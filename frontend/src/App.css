@@ -1,0 +1,116 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* ...existing code... */
+
+.input-group .upload-button {
+    padding: 10px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.3s ease;
+    margin-right: 10px; /* Space between button and file name */
+}
+
+.input-group .upload-button:hover {
+    background-color: #0056b3;
+}
+
+.input-group .file-name-display {
+    font-size: 0.9em;
+    color: #555;
+    margin-left: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-grow: 1; /* Allow file name to take available space */
+}
+
+
+.file-preview {
+    margin-top: 15px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+    max-height: 200px; /* Limit preview height */
+    overflow-y: auto; /* Add scroll for long content */
+}
+
+.file-preview h4 {
+    margin-top: 0;
+    margin-bottom: 5px;
+    font-size: 1.1em;
+    color: #333;
+}
+
+.file-preview pre {
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word; /* Break words if necessary */
+    font-size: 0.9em;
+    color: #444;
+    margin: 0;
+}
+
+/* Ensure the input group can accommodate the button and file name */
+.input-group {
+    /* ... other styles ... */
+    display: flex; /* Use flexbox for better alignment */
+    align-items: center; /* Vertically align items */
+}
+
+.input-group select,
+.input-group input[type="text"],
+.input-group input[type="password"] {
+    flex-grow: 1; /* Allow input fields to take available space */
+    /* ... other input styles ... */
+}
+
+.input-group .icon {
+    margin-right: 10px; /* Ensure icon has space */
+}
+
+/* ...existing code... */

@@ -1,0 +1,125 @@
+import React, { createContext, useContext, useState, ReactNode } from "react";
+
+// Define types for our workflow
+export type WorkflowStep = "database" | "process" | "train" | "results";
+
+export type DatabaseConfig = {
+  databaseType: string;
+  connectionString?: string;
+  schema?: string;
+  table?: string;
+};
+
+export type ProcessConfig = {
+  timeColumn: string;
+  targetVariable: string;
+  frequency: "daily" | "weekly" | "monthly";
+  features: string[];
+};
+
+export type ModelConfig = {
+  modelType: "ARIMA" | "Prophet" | "LSTM" | "RandomForest" | "XGBoost";
+  hyperparameterTuning: boolean;
+  ensembleLearning: boolean;
+  transferLearning: boolean;
+};
+
+export type ResultsData = {
+  metrics: {
+    mse: number;
+    rmse: number;
+    mae: number;
+    mape: number;
+  };
+  forecasts: {
+    dates: string[];
+    actual: number[];
+    predicted: number[];
+  };
+  dataInfo: {
+    title: string;
+    filename: string;
+  };
+  modelInfo: {
+    type: string;
+    parameters: Record<string, any>;
+    features: {
+      hyperparameterTuning: boolean;
+      transferLearning: boolean;
+      ensembleLearning: boolean;
+    };
+  };
+};
+
+interface WorkflowContextType {
+  currentStep: WorkflowStep;
+  setCurrentStep: (step: WorkflowStep) => void;
+  database: DatabaseConfig;
+  setDatabase: (config: DatabaseConfig) => void;
+  process: ProcessConfig;
+  setProcess: (config: ProcessConfig) => void;
+  model: ModelConfig;
+  setModel: (config: ModelConfig) => void;
+  results: ResultsData | null;
+  setResults: (data: ResultsData | null) => void;
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  availableTables: string[];
+  setAvailableTables: (tables: string[]) => void;
+  availableColumns: string[];
+  setAvailableColumns: (columns: string[]) => void;
+}
+
+const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
+
+export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>("database");
+  const [database, setDatabase] = useState<DatabaseConfig>({
+    databaseType: "mongodb",
+  });
+  const [process, setProcess] = useState<ProcessConfig>({
+    timeColumn: "",
+    targetVariable: "",
+    frequency: "daily",
+    features: [],
+  });
+  const [model, setModel] = useState<ModelConfig>({
+    modelType: "Prophet",
+    hyperparameterTuning: false,
+    ensembleLearning: false,
+    transferLearning: false,
+  });
+  const [results, setResults] = useState<ResultsData | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [availableTables, setAvailableTables] = useState<string[]>([]);
+  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
+
+  const value = {
+    currentStep,
+    setCurrentStep,
+    database,
+    setDatabase,
+    process,
+    setProcess,
+    model,
+    setModel,
+    results,
+    setResults,
+    isLoading,
+    setIsLoading,
+    availableTables,
+    setAvailableTables,
+    availableColumns,
+    setAvailableColumns,
+  };
+
+  return <WorkflowContext.Provider value={value}>{children}</WorkflowContext.Provider>;
+};
+
+export const useWorkflow = () => {
+  const context = useContext(WorkflowContext);
+  if (context === undefined) {
+    throw new Error("useWorkflow must be used within a WorkflowProvider");
+  }
+  return context;
+};
