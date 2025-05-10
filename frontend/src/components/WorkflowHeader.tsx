@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useWorkflow, WorkflowStep } from "@/contexts/WorkflowContext";
 import { Button } from "@/components/ui/button";
 import { gsap } from "gsap";
-import { Home, Database, FileInput, Brain, BarChart, User, LogOut, Loader2 } from "lucide-react";
+import { Home, Database, FileInput, Brain, BarChart, User, LogOut, Loader2, LineChart } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -119,37 +119,45 @@ const WorkflowHeader = () => {
   return (
     <div ref={headerRef} className="bg-gray-900 shadow-sm">
       <div className="container mx-auto px-6 py-4">
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-6">
-          {/* Main Navigation */}
-          <div className="flex items-center space-x-8 overflow-x-auto w-full py-2">
-            {steps.map((step) => {
-              const Icon = step.icon;
-              const isActive = currentStep === step.id || (step.id === "home" && currentStep === null);
+        <div className="flex items-center justify-between">
+          {/* Logo Section */}
+          <div className="flex items-center gap-2">
+            <LineChart className="h-8 w-8 text-indigo-400" />
+            <span className="text-xl font-bold text-white">TimeSeries</span>
+          </div>
 
-              return (
-                <div key={step.id} className="relative group">
-                  <Button
-                    variant="ghost"
-                    className={`p-0 h-auto text-gray-300 hover:bg-transparent group-hover:text-indigo-400 ${
-                      isActive ? "text-amber-200" : ""
-                    }`}
-                    onClick={() => handleStepChange(step.id as WorkflowStep)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span style={{ fontSize: 18, color: "currentColor" }}>
-                        <Icon />
-                      </span>
-                      <span className="text-[15px] font-medium tracking-wide">{step.title}</span>
-                    </div>
-                  </Button>
-                  <div className={`
-                    absolute bottom-0 left-0 h-[2px] bg-indigo-400 
-                    transition-all duration-300 ease-out 
-                    ${isActive ? "w-full bg-amber-200" : "w-0 group-hover:w-full"}
-                  `} />
-                </div>
-              );
-            })}
+          {/* Main Navigation - Centered */}
+          <div className="flex-1 flex justify-center">
+            <div className="flex items-center space-x-8 overflow-x-auto py-2">
+              {steps.map((step) => {
+                const Icon = step.icon;
+                const isActive = currentStep === step.id || (step.id === "home" && currentStep === null);
+
+                return (
+                  <div key={step.id} className="relative group">
+                    <Button
+                      variant="ghost"
+                      className={`p-0 h-auto text-gray-300 hover:bg-transparent group-hover:text-indigo-400 ${
+                        isActive ? "text-amber-200" : ""
+                      }`}
+                      onClick={() => handleStepChange(step.id as WorkflowStep)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span style={{ fontSize: 18, color: "currentColor" }}>
+                          <Icon />
+                        </span>
+                        <span className="text-[15px] font-medium tracking-wide">{step.title}</span>
+                      </div>
+                    </Button>
+                    <div className={`
+                      absolute bottom-0 left-0 h-[2px] bg-indigo-400 
+                      transition-all duration-300 ease-out 
+                      ${isActive ? "w-full bg-amber-200" : "w-0 group-hover:w-full"}
+                    `} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
           
           {/* Right Side Menu */}
