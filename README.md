@@ -69,6 +69,6 @@ This project is licensed under the MIT License.
 
 - Karthik Rayaprolu - [GitHub Profile](https://github.com/karthikrayaprolu)  
 - Kirthi Sayimpu - [GitHub Profile](https://github.com/Sarvanii)
-- Gowthami Kota- [GitHub Profile](https://github.com/kotagowthami)  
+- Gowthami Kota- [GitHub Profile](https://github.com/gowthamikota)  
 
 
