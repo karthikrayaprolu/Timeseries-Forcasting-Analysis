@@ -102,14 +102,14 @@ const WorkflowHeader = () => {
       <Button 
         variant="ghost" 
         className="text-gray-300 hover:text-indigo-400"
-        onClick={() => navigate('/login')}
+        onClick={() => navigate('/auth/login')}
       >
         Login
       </Button>
       <Button 
         variant="ghost" 
         className="text-gray-300 hover:text-indigo-400"
-        onClick={() => navigate('/signup')}
+        onClick={() => navigate('/auth/signup')}
       >
         Sign Up
       </Button>
