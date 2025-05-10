@@ -2,6 +2,7 @@
 import React, { useEffect } from "react";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import WorkflowHeader from "./WorkflowHeader";
+import Home from "./steps/Home";
 import DatabaseStep from "./steps/DatabaseStep";
 import ProcessStep from "./steps/ProcessStep";
 import TrainStep from "./steps/TrainStep";
@@ -36,6 +37,8 @@ const Dashboard = () => {
   // Render the current step
   const renderStep = () => {
     switch (currentStep) {
+      case "home":
+        return <Home />;
       case "database":
         return <DatabaseStep />;
       case "process":
