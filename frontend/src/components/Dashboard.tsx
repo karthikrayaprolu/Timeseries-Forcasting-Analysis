@@ -1,4 +1,3 @@
-
 import React, { useEffect } from "react";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import WorkflowHeader from "./WorkflowHeader";
@@ -38,6 +37,7 @@ const Dashboard = () => {
   const renderStep = () => {
     switch (currentStep) {
       case "home":
+      case null:
         return <Home />;
       case "database":
         return <DatabaseStep />;
@@ -48,7 +48,7 @@ const Dashboard = () => {
       case "results":
         return <ResultsStep />;
       default:
-        return <DatabaseStep />;
+        return <Home />;
     }
   };
 

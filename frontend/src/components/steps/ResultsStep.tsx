@@ -14,6 +14,14 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { FileDown } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 const ResultsStep = () => {
   const { results, setCurrentStep, isLoading, setIsLoading } = useWorkflow();
@@ -58,14 +66,16 @@ const ResultsStep = () => {
     };
   }).filter(data => data.Actual !== null || data.Predicted !== null);
 
-  const handleExport = async (format) => {
+  const handleExport = async (format: 'csv' | 'excel' | 'json') => {
+    if (isLoading) return;
+    
     setIsLoading(true);
     try {
-      const exportResult = await api.exportResults(format, results);
-      toast.success(exportResult.message);
+      await api.exportResults(format, results);
+      toast.success(`Results exported successfully as ${format.toUpperCase()}`);
     } catch (error) {
-      console.error("Error exporting results:", error);
-      toast.error("Failed to export results");
+      console.error("Export error:", error);
+      toast.error(`Failed to export results as ${format.toUpperCase()}`);
     } finally {
       setIsLoading(false);
     }
@@ -83,11 +93,17 @@ const ResultsStep = () => {
     { label: "MAPE", value: Number(results.metrics.mape).toFixed(2) + "%" },
   ];
 
+  // Export card content
+  const exportButtons = [
+    { format: "csv", label: "CSV" },
+    { format: "excel", label: "Excel" },
+    { format: "json", label: "JSON" },
+  ];
+
   return (
     <div ref={componentRef} className="workflow-step w-full">
       <h2 className="step-title mb-8 text-center">Forecasting Results</h2>
       <div className="space-y-8">
-
         {/* Settings Cards: Basic & Advanced side by side */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Basic Settings Card */}
@@ -128,93 +144,95 @@ const ResultsStep = () => {
             </div>
           ))}
         </div>
-
+        
         {/* Forecast Chart */}
-        <div className="bg-white p-6 rounded-lg shadow-md border border-border flex flex-col mb-8">
-          <h3 className="text-lg font-medium mb-4">{results.dataInfo.title} Forecast</h3>
-          <p className="text-sm text-muted-foreground mb-4">Based on data from: {results.dataInfo.filename}</p>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={chartData}
-                margin={{ top: 5, right: 30, left: 20, bottom: 60 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 12 }}
-                  interval={2}
-                  angle={-45}
-                  textAnchor="end"
-                  height={60}
-                />
-                <YAxis
-                  label={{
-                    value: results.dataInfo.title,
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { textAnchor: "middle" },
-                  }}
-                />
-                <Tooltip
-                  formatter={(value) => {
-                    if (value === null || isNaN(value)) return ["N/A", ""];
-                    return [Number(value).toFixed(2), ""];
-                  }}
-                  labelFormatter={(label) => `Date: ${label}`}
-                  contentStyle={{ backgroundColor: "white", border: "1px solid #ccc" }}
-                />
-                <Legend verticalAlign="top" height={36} wrapperStyle={{ paddingBottom: "20px" }} />
-                <Line
-                  type="monotone"
-                  dataKey="Actual"
-                  stroke="#8884d8"
-                  strokeWidth={2}
-                  dot={{ r: 2 }}
-                  activeDot={{ r: 4 }}
-                  name="Historical Data"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="Predicted"
-                  stroke="#82ca9d"
-                  strokeWidth={2}
-                  dot={{ r: 2 }}
-                  activeDot={{ r: 4 }}
-                  name="Forecast"
-                  strokeDasharray="5 5"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+        <Card>
+          <div className="bg-white p-6 rounded-lg shadow-md border border-border flex flex-col mb-8">
+            <h3 className="text-lg font-medium mb-4">{results.dataInfo.title} Forecast</h3>
+            <p className="text-sm text-muted-foreground mb-4">Based on data from: {results.dataInfo.filename}</p>
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={chartData}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 60 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 12 }}
+                    interval={2}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis
+                    label={{
+                      value: results.dataInfo.title,
+                      angle: -90,
+                      position: "insideLeft",
+                      style: { textAnchor: "middle" },
+                    }}
+                  />
+                  <Tooltip
+                    formatter={(value: any) => {
+                      if (value === null || isNaN(Number(value))) return ["N/A", ""];
+                      return [Number(value).toFixed(2), ""];
+                    }}
+                    labelFormatter={(label) => `Date: ${label}`}
+                    contentStyle={{ backgroundColor: "white", border: "1px solid #ccc" }}
+                  />
+                  <Legend verticalAlign="top" height={36} wrapperStyle={{ paddingBottom: "20px" }} />
+                  <Line
+                    type="monotone"
+                    dataKey="Actual"
+                    stroke="#8884d8"
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    activeDot={{ r: 4 }}
+                    name="Historical Data"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="Predicted"
+                    stroke="#82ca9d"
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    activeDot={{ r: 4 }}
+                    name="Forecast"
+                    strokeDasharray="5 5"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
+        </Card>
 
-        {/* Export Buttons as Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-          <button
-            className="export-card p-4 rounded-lg bg-white shadow-md border border-border flex flex-col items-center justify-center font-semibold hover:bg-blue-50 transition"
-            onClick={() => handleExport("csv")}
-            disabled={isLoading}
-            type="button"
-          >
-            Export as CSV
-          </button>
-          <button
-            className="export-card p-4 rounded-lg bg-white shadow-md border border-border flex flex-col items-center justify-center font-semibold hover:bg-blue-50 transition"
-            onClick={() => handleExport("excel")}
-            disabled={isLoading}
-            type="button"
-          >
-            Export as Excel
-          </button>
-          <button
-            className="export-card p-4 rounded-lg bg-white shadow-md border border-border flex flex-col items-center justify-center font-semibold hover:bg-blue-50 transition"
-            onClick={() => handleExport("json")}
-            disabled={isLoading}
-            type="button"
-          >
-            Export as JSON
-          </button>
+        {/* Export Card - Moved below the graph */}
+        <div className="w-full max-w-4xl mx-auto">
+          <Card className="export-card shadow-lg">
+            <CardHeader className="space-y-2">
+              <CardTitle className="text-2xl font-bold">Export Results</CardTitle>
+              <CardDescription className="text-base">
+                Download your results in different formats
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4">
+                {exportButtons.map(({ format, label }) => (
+                  <Button
+                    key={format}
+                    variant="outline"
+                    className="flex items-center justify-center gap-3 h-12 text-base font-medium hover:bg-gray-100 transition-colors"
+                    disabled={isLoading}
+                    onClick={() => handleExport(format as 'csv' | 'excel' | 'json')}
+                  >
+                    <FileDown className="h-5 w-5" />
+                    <span>Export as {label}</span>
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Action Buttons: Back (left) & Start New Forecast (right) */}

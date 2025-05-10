@@ -735,5 +735,93 @@ export const api = {
         Prophet: generateRandomWeights(50)
       }[modelType];
     }
+  },
+
+  // Export results to file
+  exportResults: async (format: 'csv' | 'excel' | 'json', results: any) => {
+    try {
+      // Prepare the data in a structured format
+      const exportData = {
+        dates: results.forecasts.dates,
+        actual: results.forecasts.actual,
+        predicted: results.forecasts.predicted,
+        metrics: results.metrics,
+        modelInfo: results.modelInfo
+      };
+
+      // Convert data based on format
+      let blob: Blob;
+      let filename: string;
+      const timestamp = new Date().toISOString().split('T')[0];
+
+      switch (format) {
+        case 'csv': {
+          // Create CSV content
+          const rows = [
+            ['Date', 'Actual', 'Predicted'],
+            ...results.forecasts.dates.map((date: string, i: number) => [
+              date,
+              results.forecasts.actual[i],
+              results.forecasts.predicted[i]
+            ])
+          ];
+          const csvContent = rows.map(row => row.join(',')).join('\n');
+          blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          filename = `forecast_results_${timestamp}.csv`;
+          break;
+        }
+        case 'excel': {
+          // Create Excel-compatible CSV
+          const rows = [
+            ['Forecast Results'],
+            ['Generated on:', new Date().toLocaleString()],
+            [''],
+            ['Model Information'],
+            ['Type:', results.modelInfo.type],
+            ['Parameters:', JSON.stringify(results.modelInfo.parameters)],
+            [''],
+            ['Metrics'],
+            ['MSE:', results.metrics.mse],
+            ['RMSE:', results.metrics.rmse],
+            ['MAE:', results.metrics.mae],
+            ['MAPE:', results.metrics.mape],
+            [''],
+            ['Forecasts'],
+            ['Date', 'Actual', 'Predicted'],
+            ...results.forecasts.dates.map((date: string, i: number) => [
+              date,
+              results.forecasts.actual[i],
+              results.forecasts.predicted[i]
+            ])
+          ];
+          const csvContent = rows.map(row => row.join(',')).join('\n');
+          blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+          filename = `forecast_results_${timestamp}.xls`;
+          break;
+        }
+        case 'json': {
+          // Create JSON content
+          const jsonContent = JSON.stringify(exportData, null, 2);
+          blob = new Blob([jsonContent], { type: 'application/json' });
+          filename = `forecast_results_${timestamp}.json`;
+          break;
+        }
+        default:
+          throw new Error('Unsupported export format');
+      }
+
+      // Create download link and trigger download
+      const link = document.createElement('a');
+      link.href = window.URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      return { success: true, message: `Results exported successfully as ${format.toUpperCase()}` };
+    } catch (error) {
+      console.error('Export error:', error);
+      throw new Error(`Failed to export results as ${format.toUpperCase()}`);
+    }
   }
 };

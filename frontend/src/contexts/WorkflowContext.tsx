@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from "react";
 
 // Define types for our workflow
-export type WorkflowStep = "home"|"database" | "process" | "train" | "results";
+export type WorkflowStep = "home" | "database" | "process" | "train" | "results";
 
 export type DatabaseConfig = {
   databaseType: string;
@@ -52,7 +52,7 @@ export type ResultsData = {
 };
 
 interface WorkflowContextType {
-  currentStep: WorkflowStep;
+  currentStep: WorkflowStep | null;
   setCurrentStep: (step: WorkflowStep) => void;
   database: DatabaseConfig;
   setDatabase: (config: DatabaseConfig) => void;
@@ -70,10 +70,11 @@ interface WorkflowContextType {
   setAvailableColumns: (columns: string[]) => void;
 }
 
+
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
 
 export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>("database");
+  const [currentStep, setCurrentStep] = useState<WorkflowStep | null>("home");
   const [database, setDatabase] = useState<DatabaseConfig>({
     databaseType: "mongodb",
   });
