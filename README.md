@@ -62,16 +62,13 @@ The app will be running at [http://localhost:3000](http://localhost:3000).
 Contributions, issues, and feature requests are welcome!  
 Feel free to open an issue or submit a pull request.
 
-## 📄 License
-
-[MIT](LICENSE)
-
----
+## 📜 License
+This project is licensed under the MIT License.
 
 ## Authors
 
 - Karthik Rayaprolu - [GitHub Profile](https://github.com/karthikrayaprolu)  
 - Kirthi Sayimpu - [GitHub Profile](https://github.com/Sarvanii)
-- Gowthami Kota- [GitHub Profile](https://github.com/kotaGowthami)  
+- Gowthami Kota- [GitHub Profile](https://github.com/kotagowthami)  
 
 
