@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from "react";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import { api } from "@/services/api";
@@ -14,6 +13,38 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 
+// --- Wave Bars Loader ---
+const WaveBarsLoader = () => (
+  <div className="flex flex-col items-center py-6">
+    <div className="flex space-x-1 mb-2">
+      {[...Array(5)].map((_, i) => (
+        <div
+          key={i}
+          className="w-2 h-6 bg-blue-500 rounded animate-wave"
+          style={{
+            animationDelay: `${i * 0.15}s`,
+          }}
+        />
+      ))}
+    </div>
+    <p className="text-blue-700 text-sm font-medium text-center">
+      Please wait while we prepare your features...
+    </p>
+    <style>
+      {`
+        @keyframes wave {
+          0%, 60%, 100% { transform: scaleY(1); }
+          30% { transform: scaleY(1.8); }
+        }
+        .animate-wave {
+          display: inline-block;
+          animation: wave 1s infinite ease-in-out;
+        }
+      `}
+    </style>
+  </div>
+);
+
 const ProcessStep = () => {
   const {
     process,
@@ -25,10 +56,9 @@ const ProcessStep = () => {
     isLoading,
     setIsLoading,
   } = useWorkflow();
-  
+
   const componentRef = useRef<HTMLDivElement>(null);
 
-  // GSAP animation
   useEffect(() => {
     if (componentRef.current) {
       gsap.fromTo(
@@ -39,7 +69,6 @@ const ProcessStep = () => {
     }
   }, []);
 
-  // Load columns from selected table
   useEffect(() => {
     const loadColumns = async () => {
       if (database.table) {
@@ -55,7 +84,6 @@ const ProcessStep = () => {
         }
       }
     };
-    
     loadColumns();
   }, [database.table, setAvailableColumns, setIsLoading]);
 
@@ -64,7 +92,6 @@ const ProcessStep = () => {
       toast.warning("Please select time column and target variable");
       return;
     }
-
     setIsLoading(true);
     try {
       await api.processData({
@@ -81,8 +108,7 @@ const ProcessStep = () => {
     }
   };
 
-  // Handle feature selection
-  const handleFeatureToggle = (column: string) => {
+  const handleFeatureToggle = (column) => {
     const features = [...process.features];
     if (features.includes(column)) {
       setProcess({
@@ -97,7 +123,6 @@ const ProcessStep = () => {
     }
   };
 
-  // Back to previous step
   const handleBack = () => {
     setCurrentStep("database");
   };
@@ -105,9 +130,20 @@ const ProcessStep = () => {
   return (
     <div ref={componentRef} className="workflow-step">
       <h2 className="step-title">Process Data</h2>
-      
-      <div className="space-y-6">
-        <div className="space-y-2">          <label className="text-sm font-medium">Time Column</label>
+
+      {/* Engaging loader */}
+      {isLoading && <WaveBarsLoader />}
+
+      <form
+        className={`space-y-6 ${isLoading ? "pointer-events-none opacity-60" : ""}`}
+        onSubmit={e => {
+          e.preventDefault();
+          handleProcess();
+        }}
+        aria-disabled={isLoading}
+      >
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Time Column</label>
           <p className="text-xs text-muted-foreground mb-2">
             Select the column containing date/time values
           </p>
@@ -119,8 +155,14 @@ const ProcessStep = () => {
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select time column" />
             </SelectTrigger>
-            <SelectContent>              {availableColumns
-                .filter((col) => col.toLowerCase().includes("month") || col.toLowerCase().includes("date") || col.toLowerCase().includes("time"))
+            <SelectContent>
+              {availableColumns
+                .filter(
+                  (col) =>
+                    col.toLowerCase().includes("month") ||
+                    col.toLowerCase().includes("date") ||
+                    col.toLowerCase().includes("time")
+                )
                 .map((column) => (
                   <SelectItem key={column} value={column}>
                     {column}
@@ -142,10 +184,11 @@ const ProcessStep = () => {
             </SelectTrigger>
             <SelectContent>
               {availableColumns
-                .filter((col) => 
-                  !col.toLowerCase().includes("date") && 
-                  !col.toLowerCase().includes("time") &&
-                  col !== process.timeColumn
+                .filter(
+                  (col) =>
+                    !col.toLowerCase().includes("date") &&
+                    !col.toLowerCase().includes("time") &&
+                    col !== process.timeColumn
                 )
                 .map((column) => (
                   <SelectItem key={column} value={column}>
@@ -160,7 +203,7 @@ const ProcessStep = () => {
           <label className="text-sm font-medium">Time Frequency</label>
           <Select
             value={process.frequency}
-            onValueChange={(value: "daily" | "weekly" | "monthly") => 
+            onValueChange={(value) =>
               setProcess({ ...process, frequency: value })
             }
             disabled={isLoading}
@@ -180,9 +223,9 @@ const ProcessStep = () => {
           <label className="text-sm font-medium">Additional Features</label>
           <div className="bg-secondary/50 p-4 rounded-md max-h-40 overflow-y-auto space-y-2">
             {availableColumns
-              .filter((col) => 
-                col !== process.timeColumn && 
-                col !== process.targetVariable
+              .filter(
+                (col) =>
+                  col !== process.timeColumn && col !== process.targetVariable
               )
               .map((column) => (
                 <div key={column} className="flex items-center space-x-2">
@@ -190,6 +233,7 @@ const ProcessStep = () => {
                     id={`feature-${column}`}
                     checked={process.features.includes(column)}
                     onCheckedChange={() => handleFeatureToggle(column)}
+                    disabled={isLoading}
                   />
                   <label
                     htmlFor={`feature-${column}`}
@@ -206,11 +250,11 @@ const ProcessStep = () => {
           <Button onClick={handleBack} variant="outline" disabled={isLoading}>
             Back
           </Button>
-          <Button onClick={handleProcess} disabled={isLoading}>
+          <Button type="submit" disabled={isLoading}>
             {isLoading ? "Processing..." : "Process & Continue"}
           </Button>
         </div>
-      </div>
+      </form>
     </div>
   );
 };
