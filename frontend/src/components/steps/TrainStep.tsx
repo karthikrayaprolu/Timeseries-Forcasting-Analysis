@@ -86,7 +86,25 @@ const TrainStep = () => {
   const handleTrain = async () => {
     setIsLoading(true);
     try {
-      const results = await api.trainModel({ ...model });
+      const trainingResults = await api.trainModel({ ...model });
+      // Structure the results data properly
+      const results = {
+        dataInfo: {
+          title: trainingResults.dataInfo?.title || "Time Series Data",
+          filename: trainingResults.dataInfo?.filename || "data.csv"
+        },
+        modelInfo: {
+          type: model.modelType,
+          parameters: {}, // Add empty parameters object to satisfy type
+          features: {
+            hyperparameterTuning: model.hyperparameterTuning,
+            transferLearning: model.transferLearning,
+            ensembleLearning: model.ensembleLearning
+          }
+        },
+        metrics: trainingResults.metrics,
+        forecasts: trainingResults.forecasts
+      };
       setResults(results);
       toast.success("Model training completed successfully");
       setCurrentStep("results");
@@ -106,10 +124,10 @@ const TrainStep = () => {
   return (
     <div
       ref={componentRef}
-      className="workflow-step w-full min-h-screen p-4 sm:p-8 bg-white rounded-none shadow-none"
+      className="workflow-step max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-lg"
       aria-label="Train Model Step"
     >
-      <h2 className="text-2xl font-semibold mb-6 text-center">Train Model</h2>
+      <h2 className="text-3xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-indigo-800 to-blue-600">Train Model</h2>
 
       {/* Show engaging robot and message while loading */}
       {isLoading && <LoadingRobot />}
@@ -122,8 +140,8 @@ const TrainStep = () => {
         }}
         aria-disabled={isLoading}
       >
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="model-type">
+        <div className="space-y-4">
+          <label className="text-lg font-medium text-gray-700" htmlFor="model-type">
             Model Type
           </label>
           <Select
@@ -133,12 +151,12 @@ const TrainStep = () => {
             }
             disabled={isLoading}
           >
-            <SelectTrigger className="w-full" id="model-type">
+            <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all" id="model-type">
               <SelectValue placeholder="Select model type" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
               {modelTypes.map((type) => (
-                <SelectItem key={type.id} value={type.id as any}>
+                <SelectItem key={type.id} value={type.id as any} className="hover:bg-indigo-50 cursor-pointer">
                   {type.name}
                 </SelectItem>
               ))}
@@ -147,14 +165,14 @@ const TrainStep = () => {
         </div>
 
         <div className="space-y-4">
-          <label className="text-sm font-medium">Advanced Options</label>
-          <div className="space-y-4 bg-secondary/50 p-4 rounded-md">
+          <label className="text-lg font-medium text-gray-700">Advanced Options</label>
+          <div className="space-y-6 bg-gray-50 p-6 rounded-lg border-2 border-gray-200">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <label htmlFor="hyperparameter" className="text-sm font-medium">
+                <label htmlFor="hyperparameter" className="text-base font-medium text-gray-700">
                   Hyperparameter Tuning
                 </label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-gray-500">
                   Use grid/random search to find optimal parameters
                 </p>
               </div>
@@ -165,15 +183,16 @@ const TrainStep = () => {
                   setModel({ ...model, hyperparameterTuning: checked })
                 }
                 disabled={isLoading}
+                className="data-[state=checked]:bg-indigo-600"
               />
             </div>
 
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <label htmlFor="ensemble" className="text-sm font-medium">
+                <label htmlFor="ensemble" className="text-base font-medium text-gray-700">
                   Ensemble Learning
                 </label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-gray-500">
                   Combine multiple models for better performance
                 </p>
               </div>
@@ -184,15 +203,16 @@ const TrainStep = () => {
                   setModel({ ...model, ensembleLearning: checked })
                 }
                 disabled={isLoading}
+                className="data-[state=checked]:bg-indigo-600"
               />
             </div>
 
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <label htmlFor="transfer" className="text-sm font-medium">
+                <label htmlFor="transfer" className="text-base font-medium text-gray-700">
                   Transfer Learning
                 </label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-gray-500">
                   Use pre-trained models to improve performance
                 </p>
               </div>
@@ -203,25 +223,26 @@ const TrainStep = () => {
                   setModel({ ...model, transferLearning: checked })
                 }
                 disabled={isLoading}
+                className="data-[state=checked]:bg-indigo-600"
               />
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row justify-between gap-2 pt-4">
+        <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
           <Button
             type="button"
             onClick={handleBack}
             variant="outline"
             disabled={isLoading}
-            className="w-full sm:w-auto"
+            className="h-12 px-8 border-2 border-gray-200 hover:border-gray-300 text-gray-700 font-medium rounded-lg transition-all"
           >
             Back
           </Button>
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full sm:w-auto flex items-center justify-center bg-blue-accent hover:bg-blue-accent/90"
+            className="h-12 px-8 bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-700 hover:to-blue-600 text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center"
           >
             {isLoading ? (
               <>
