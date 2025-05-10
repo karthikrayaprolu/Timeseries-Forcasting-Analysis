@@ -59,7 +59,7 @@ const Home = () => {
             <Button 
               variant="outline" 
               className="border-amber-400 text-amber-600 hover:bg-amber-50 px-8 py-6 text-lg hover:border-amber-500 transition-all"
-              onClick={() => navigate('/login')}
+              onClick={() => navigate('/learn-more')}
             >
               <Settings className="mr-2" />
               Learn More
@@ -167,14 +167,14 @@ const Home = () => {
           >
             <Button 
               className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white px-10 py-6 text-lg font-bold shadow-lg hover:shadow-xl transition-all"
-              onClick={() => navigate('/signup')}
+              onClick={() => navigate('/auth/signup')}
             >
               Start Your Free Trial
             </Button>
             <Button 
               variant="outline" 
               className="border-indigo-400 text-indigo-600 hover:bg-indigo-50 px-10 py-6 text-lg hover:border-indigo-500 transition-all"
-              onClick={() => navigate('/login')}
+              onClick={() => navigate('/auth/login')}
             >
               Login to Existing Account
             </Button>
