@@ -13,10 +13,6 @@ A modern, interactive web application for time series forecasting and analysis. 
 - **Export results** as CSV, Excel, or JSON
 - **Responsive UI** with engaging feedback and toast notifications
 
-## 🖥️ Demo
-
-> _Add a screenshot or GIF here if you have one!_
-
 ## 🛠️ Getting Started
 
 ### 1. Clone the repository
@@ -75,7 +71,7 @@ Feel free to open an issue or submit a pull request.
 ## Authors
 
 - Karthik Rayaprolu - [GitHub Profile](https://github.com/karthikrayaprolu)  
-- Kirthi - [GitHub Profile](https://github.com/Sarvanii)
-- Gow - [GitHub Profile](https://github.com/kotagowthami)  
+- Kirthi Sayimpu - [GitHub Profile](https://github.com/Sarvanii)
+- Gowthami Kota- [GitHub Profile](https://github.com/kotaGowthami)  
 
 
