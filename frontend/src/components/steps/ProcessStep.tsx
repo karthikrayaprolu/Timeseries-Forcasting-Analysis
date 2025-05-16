@@ -88,21 +88,31 @@ const ProcessStep = () => {
   }, [database.table, setAvailableColumns, setIsLoading]);
 
   const handleProcess = async () => {
-    if (!process.timeColumn || !process.targetVariable) {
-      toast.warning("Please select time column and target variable");
+    // Validate required fields
+    if (!process.timeColumn || !process.targetVariable || !process.frequency) {
+      toast.warning("Please select time column, target variable, and frequency");
       return;
     }
+
     setIsLoading(true);
     try {
-      await api.processData({
-        table: database.table,
-        ...process,
+      const processResult = await api.processData({
+        timeColumn: process.timeColumn,
+        targetVariable: process.targetVariable,
+        frequency: process.frequency,
+        features: process.features || [],
+        aggregationMethod: process.aggregationMethod
       });
-      toast.success("Data processed successfully");
-      setCurrentStep("train");
-    } catch (error) {
+
+      if (processResult.preview) {
+        toast.success(`Data processed successfully. ${processResult.preview.rows} rows processed.`);
+        setTimeout(() => setCurrentStep("train"), 1000);
+      } else {
+        throw new Error("Invalid response from server");
+      }
+    } catch (error: any) {
       console.error("Error processing data:", error);
-      toast.error("Failed to process data");
+      toast.error(error.message || "Failed to process data");
     } finally {
       setIsLoading(false);
     }
@@ -201,22 +211,44 @@ const ProcessStep = () => {
 
         <div className="space-y-4">
           <label className="text-lg font-medium text-gray-700">Time Frequency</label>
-          <Select
-            value={process.frequency}
-            onValueChange={(value) =>
-              setProcess({ ...process, frequency: value })
-            }
-            disabled={isLoading}
-          >
-            <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
-              <SelectValue placeholder="Select frequency" />
-            </SelectTrigger>
-            <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
-              <SelectItem value="daily" className="hover:bg-indigo-50 cursor-pointer">Daily</SelectItem>
-              <SelectItem value="weekly" className="hover:bg-indigo-50 cursor-pointer">Weekly</SelectItem>
-              <SelectItem value="monthly" className="hover:bg-indigo-50 cursor-pointer">Monthly</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="space-y-2">
+            <Select
+              value={process.frequency}
+              onValueChange={(value) =>
+                setProcess({ ...process, frequency: value as "daily" | "weekly" | "monthly" })
+              }
+              disabled={isLoading}
+            >
+              <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
+                <SelectValue placeholder="Select frequency" />
+              </SelectTrigger>
+              <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
+                <SelectItem value="daily" className="hover:bg-indigo-50 cursor-pointer">Daily</SelectItem>
+                <SelectItem value="weekly" className="hover:bg-indigo-50 cursor-pointer">Weekly</SelectItem>
+                <SelectItem value="monthly" className="hover:bg-indigo-50 cursor-pointer">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {(process.frequency === 'weekly' || process.frequency === 'monthly') && (
+              <Select
+                value={process.aggregationMethod}
+                onValueChange={(value) =>
+                  setProcess({ ...process, aggregationMethod: value as "mean" | "sum" | "max" | "min" })
+                }
+                disabled={isLoading}
+              >
+                <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
+                  <SelectValue placeholder="Select aggregation method" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
+                  <SelectItem value="mean" className="hover:bg-indigo-50 cursor-pointer">Mean (Average)</SelectItem>
+                  <SelectItem value="sum" className="hover:bg-indigo-50 cursor-pointer">Sum</SelectItem>
+                  <SelectItem value="max" className="hover:bg-indigo-50 cursor-pointer">Maximum</SelectItem>
+                  <SelectItem value="min" className="hover:bg-indigo-50 cursor-pointer">Minimum</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4">

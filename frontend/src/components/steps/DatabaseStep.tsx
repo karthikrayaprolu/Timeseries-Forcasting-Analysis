@@ -42,8 +42,6 @@ const DatabaseStep = () => {
 
   // Database types
   const databaseTypes = [
-    { id: "mongodb", name: "MongoDB" },
-    { id: "postgres", name: "PostgreSQL" },
     { id: "local", name: "CSV Upload" },
   ];
 
@@ -59,32 +57,29 @@ const DatabaseStep = () => {
     } else {
       toast.error("Please upload a valid CSV file");
     }
-  };
-
-  // Connect to database
+  };  // Connect to database
   const handleConnect = async () => {
     setIsLoading(true);
     try {
       if (database.databaseType === "local" && csvData) {
         // Handle CSV file upload
         const formData = new FormData();
-        formData.append("file", csvData);
-        await api.uploadCsvFile(formData);
-        const tables = await api.getTables("local");
-        setAvailableTables(tables);
-        setIsConnected(true);
-        toast.success("CSV file uploaded successfully");
-      } else {
-        // Handle database connection
-        await api.connectToDatabase(database.connectionString || "");
-        const tables = await api.getTables(database.databaseType);
-        setAvailableTables(tables);
-        setIsConnected(true);
-        toast.success("Connected to database successfully");
+        formData.append("file", csvData, csvData.name); // Add filename as third parameter
+        const result = await api.uploadCsvFile(formData);
+        if (result.tables) {
+          setAvailableTables(result.tables);
+          setIsConnected(true);
+          toast.success("CSV file uploaded successfully");
+        }
+      } else if (database.databaseType !== "local" && database.connectionString) {
+        // For now we only support local CSV uploads
+        toast.error("Only local CSV files are supported at this time");
+        setIsLoading(false);
+        return;
       }
     } catch (error) {
-      console.error("Error connecting to database:", error);
-      toast.error("Failed to connect to database");
+      console.error("Error processing file:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to process file");
     } finally {
       setIsLoading(false);
     }
@@ -139,9 +134,7 @@ const DatabaseStep = () => {
             <label className="text-lg font-medium text-gray-700">Upload CSV File</label>
             <FileUploader
               onFileSelect={handleFileUpload}
-              accept=".csv"
-              disabled={isLoading}
-              className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-indigo-500 transition-colors"
+              accept=".csv"              disabled={isLoading}
             />
             <p className="text-sm text-gray-500">
               Upload a CSV file containing time series data

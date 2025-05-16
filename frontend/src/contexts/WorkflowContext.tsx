@@ -15,14 +15,43 @@ export type ProcessConfig = {
   targetVariable: string;
   frequency: "daily" | "weekly" | "monthly";
   features: string[];
+  aggregationMethod?: "mean" | "sum" | "max" | "min";
+  dateFormat?: string;
+};
+
+export type ModelParameters = {
+  // Common parameters
+  timeSteps?: number;
+  units?: number;
+  epochs?: number;
+  batchSize?: number;
+  
+  // LSTM specific
+  dropout?: number;
+  learningRate?: number;
+  
+  // Tree models specific
+  n_estimators?: number;
+  max_depth?: number;
+  
+  // XGBoost specific
+  learning_rate?: number;
+  subsample?: number;
+  colsample_bytree?: number;
+  
+  // Ensemble specific
+  ensembleModels?: string[];
+  ensembleMethod?: 'voting' | 'stacking';
+  ensembleWeights?: number[] | null;
 };
 
 export type ModelConfig = {
-  modelType: "ARIMA" | "Prophet" | "LSTM" | "RandomForest" | "XGBoost";
+  modelType: "arima" | "prophet" | "lstm" | "random_forest" | "xgboost";
   hyperparameterTuning: boolean;
   ensembleLearning: boolean;
   transferLearning: boolean;
-};
+  sourceModelId?: string;
+} & ModelParameters;
 
 export type ResultsData = {
   metrics: {
@@ -31,15 +60,9 @@ export type ResultsData = {
     mae: number;
     mape: number;
   };
-  forecasts: {
-    dates: string[];
-    actual: number[];
-    predicted: number[];
-  };
-  dataInfo: {
-    title: string;
-    filename: string;
-  };
+  dates: string[];
+  actual: number[];
+  forecasts: number[];
   modelInfo: {
     type: string;
     parameters: Record<string, any>;
@@ -48,6 +71,10 @@ export type ResultsData = {
       transferLearning: boolean;
       ensembleLearning: boolean;
     };
+  };
+  dataInfo: {
+    title: string;
+    filename: string;
   };
 };
 
@@ -77,15 +104,14 @@ export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
   const [currentStep, setCurrentStep] = useState<WorkflowStep | null>("home");
   const [database, setDatabase] = useState<DatabaseConfig>({
     databaseType: "mongodb",
-  });
-  const [process, setProcess] = useState<ProcessConfig>({
+  });  const [process, setProcess] = useState<ProcessConfig>({
     timeColumn: "",
     targetVariable: "",
     frequency: "daily",
     features: [],
-  });
-  const [model, setModel] = useState<ModelConfig>({
-    modelType: "Prophet",
+    aggregationMethod: "mean"
+  });  const [model, setModel] = useState<ModelConfig>({
+    modelType: "random_forest",
     hyperparameterTuning: false,
     ensembleLearning: false,
     transferLearning: false,
