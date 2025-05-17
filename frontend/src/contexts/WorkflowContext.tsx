@@ -1,83 +1,17 @@
 import React, { createContext, useContext, useState, ReactNode } from "react";
+import { 
+  DatabaseConfig, 
+  ProcessConfig, 
+  ModelConfig,
+  ResultsData,
+  ModelType,
+  TimeFrequency
+} from "@/shared/types";
 
-// Define types for our workflow
+// Define workflow step type
 export type WorkflowStep = "home" | "database" | "process" | "train" | "results";
 
-export type DatabaseConfig = {
-  databaseType: string;
-  connectionString?: string;
-  schema?: string;
-  table?: string;
-};
-
-export type ProcessConfig = {
-  timeColumn: string;
-  targetVariable: string;
-  frequency: "daily" | "weekly" | "monthly";
-  features: string[];
-  aggregationMethod?: "mean" | "sum" | "max" | "min";
-  dateFormat?: string;
-};
-
-export type ModelParameters = {
-  // Common parameters
-  timeSteps?: number;
-  units?: number;
-  epochs?: number;
-  batchSize?: number;
-  
-  // LSTM specific
-  dropout?: number;
-  learningRate?: number;
-  
-  // Tree models specific
-  n_estimators?: number;
-  max_depth?: number;
-  
-  // XGBoost specific
-  learning_rate?: number;
-  subsample?: number;
-  colsample_bytree?: number;
-  
-  // Ensemble specific
-  ensembleModels?: string[];
-  ensembleMethod?: 'voting' | 'stacking';
-  ensembleWeights?: number[] | null;
-};
-
-export type ModelConfig = {
-  modelType: "arima" | "prophet" | "lstm" | "random_forest" | "xgboost";
-  hyperparameterTuning: boolean;
-  ensembleLearning: boolean;
-  transferLearning: boolean;
-  sourceModelId?: string;
-} & ModelParameters;
-
-export type ResultsData = {
-  metrics: {
-    mse: number;
-    rmse: number;
-    mae: number;
-    mape: number;
-  };
-  dates: string[];
-  actual: number[];
-  forecasts: number[];
-  modelInfo: {
-    type: string;
-    parameters: Record<string, any>;
-    features: {
-      hyperparameterTuning: boolean;
-      transferLearning: boolean;
-      ensembleLearning: boolean;
-    };
-  };
-  dataInfo: {
-    title: string;
-    filename: string;
-  };
-};
-
+// Define context type using shared types
 interface WorkflowContextType {
   currentStep: WorkflowStep | null;
   setCurrentStep: (step: WorkflowStep) => void;
@@ -97,21 +31,21 @@ interface WorkflowContextType {
   setAvailableColumns: (columns: string[]) => void;
 }
 
-
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
 
 export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
   const [currentStep, setCurrentStep] = useState<WorkflowStep | null>("home");
   const [database, setDatabase] = useState<DatabaseConfig>({
     databaseType: "mongodb",
-  });  const [process, setProcess] = useState<ProcessConfig>({
+  });
+  const [process, setProcess] = useState<ProcessConfig>({
     timeColumn: "",
     targetVariable: "",
     frequency: "daily",
     features: [],
-    aggregationMethod: "mean"
-  });  const [model, setModel] = useState<ModelConfig>({
-    modelType: "random_forest",
+  });
+  const [model, setModel] = useState<ModelConfig>({
+    modelType: "Prophet",
     hyperparameterTuning: false,
     ensembleLearning: false,
     transferLearning: false,
@@ -126,7 +60,7 @@ export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
     setCurrentStep,
     database,
     setDatabase,
-    process,
+    process, 
     setProcess,
     model,
     setModel,

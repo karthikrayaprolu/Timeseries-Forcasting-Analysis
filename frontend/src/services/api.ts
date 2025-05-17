@@ -1,7 +1,15 @@
 // API service for Time Series Forecasting
 import axios from 'axios';
-import { ModelConfig } from '@/contexts/WorkflowContext';
+import {
+  ProcessConfig,
+  ModelConfig,
+  ResultsData,
+  TrainingMetrics,
+  ModelInfo,
+  DatabaseConfig
+} from '@/shared/types';
 
+// Base API configuration
 const BASE_URL = 'http://localhost:5000/api';
 
 const apiClient = axios.create({
@@ -11,147 +19,88 @@ const apiClient = axios.create({
   }
 });
 
+// Error handler
+const handleApiError = (error: any, fallbackMessage: string) => {
+  if (error.response) {
+    throw new Error(error.response.data.error || fallbackMessage);
+  }
+  throw new Error('Network error - please check if the server is running');
+};
+
 export const api = {
   // File upload
   uploadCsvFile: async (formData: FormData) => {
-    const response = await apiClient.post('/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
-  },
-  // Get available tables for a database type
-  getTables: async (databaseType: string) => {
-    if (databaseType === 'local') {
-      return ['uploaded_csv'];
-    }
-    const response = await apiClient.get(`/tables?type=${databaseType}`);
-    return response.data.tables;
-  },
-
-  // Get columns for a selected table
-  getColumns: async (table: string) => {
-    const response = await apiClient.get(`/columns?table=${table}`);
-    return response.data.columns;
-  },
-
-  // Detect date format from a column
-  detectDateFormat: async (config: { timeColumn: string }) => {
-    const response = await apiClient.post('/detect-date-format', config);
-    return response.data;
-  },
-  // Process data with configuration
-  processData: async (config: {
-    timeColumn: string;
-    targetVariable: string;
-    frequency: string;
-    features: string[];
-    dateFormat?: string;
-    aggregationMethod?: 'mean' | 'sum' | 'max' | 'min';
-  }) => {
     try {
-      const response = await apiClient.post('/process', config, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      const response = await apiClient.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       return response.data;
-    } catch (error: any) {
-      if (error.response) {
-        throw new Error(error.response.data.error || 'Failed to process data');
-      }
-      throw new Error('Network error - please check if the server is running');
+    } catch (error) {
+      handleApiError(error, 'Failed to upload CSV file');
     }
   },
 
-  // Add a generic post method for API calls
-  post: async (endpoint: string, data: any) => {
+  // Get available tables for a database type
+  getTables: async (databaseType: string) => {
     try {
-      const response = await apiClient.post(endpoint, data);
+      if (databaseType === 'local') {
+        return ['uploaded_csv'];
+      }
+      const response = await apiClient.get(`/tables?type=${databaseType}`);
+      return response.data.tables;
+    } catch (error) {
+      handleApiError(error, 'Failed to get tables');
+    }
+  },
+
+  // Get columns for a table
+  getColumns: async () => {
+    try {
+      const response = await apiClient.get('/columns');
+      return response.data.columns;
+    } catch (error) {
+      handleApiError(error, 'Failed to get columns');
+    }
+  },
+
+  // Process data with selected configuration
+  processData: async (config: ProcessConfig) => {
+    try {
+      const response = await apiClient.post('/process', config);
       return response.data;
-    } catch (error: any) {
-      if (error.response) {
-        throw new Error(error.response.data.error || `Failed to ${endpoint}`);
-      }
-      throw new Error('Network error - please check if the server is running');
+    } catch (error) {
+      handleApiError(error, 'Data processing failed');
     }
   },
 
-  // Train model with configuration
-  trainModel: async (config: ModelConfig & { 
-    timeSteps?: number;
-    units?: number;
-    epochs?: number;
-    batchSize?: number;
-    ensembleModels?: string[];
-    ensembleMethod?: 'voting' | 'stacking';
-    ensembleWeights?: number[] | null;
-  }) => {
+  // Train model with selected configuration
+  trainModel: async (config: ModelConfig) => {
     try {
-      const modelConfig = {
-        modelType: config.modelType,
-        hyperparameterTuning: config.hyperparameterTuning,
-        timeSteps: config.timeSteps || 12,
-        units: config.units || 50,
-        epochs: config.epochs || 100,
-        batchSize: config.batchSize || 32,
-        ensembleLearning: config.ensembleLearning,
-        transferLearning: config.transferLearning,
-        // Ensemble specific configuration
-        ...config.ensembleLearning ? {
-          ensembleModels: config.ensembleModels,
-          ensembleMethod: config.ensembleMethod || 'voting',
-          ensembleWeights: config.ensembleWeights || null
-        } : {},
-        // Model specific parameters for hyperparameter tuning
-        n_estimators: 100,
-        max_depth: 10,
-        learning_rate: 0.1,
-        subsample: 0.8,
-        colsample_bytree: 0.8
-      };
-
-      return await api.post('/train', modelConfig);
-    } catch (error: any) {
-      if (error.response) {
-        throw new Error(error.response.data.error || 'Failed to train model');
-      }
-      throw new Error('Network error - please check if the server is running');
+      const response = await apiClient.post('/train', config);
+      return response.data;
+    } catch (error) {
+      handleApiError(error, 'Model training failed');
     }
   },
 
-  // Get available trained models for transfer learning
-  getModels: async () => {
+  // Get available models for transfer learning
+  getAvailableModels: async () => {
     try {
       const response = await apiClient.get('/models');
       return response.data;
-    } catch (error: any) {
-      if (error.response) {
-        throw new Error(error.response.data.error || 'Failed to fetch models');
-      }
-      throw new Error('Network error - please check if the server is running');
+    } catch (error) {
+      handleApiError(error, 'Failed to get available models');
     }
   },
 
-  // Export results
-  exportResults: async (format: 'csv' | 'excel' | 'json', data: any, predictionDate?: Date) => {
-    const response = await apiClient.post('/export', {
-      format,
-      data,
-      predictionDate: predictionDate?.toISOString()
-    }, {
-      responseType: 'blob'
-    });
-    
-    // Create and trigger download
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `forecast_results.${format}`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-  }
+  // Get model metrics and forecasts
+  getResults: async (modelId: string): Promise<ResultsData> => {
+    try {
+      const response = await apiClient.get(`/results/${modelId}`);
+      return response.data;
+    } catch (error) {
+      handleApiError(error, 'Failed to get results');
+      throw error;
+    }
+  },
 };
