@@ -74,7 +74,7 @@ const ProcessStep = () => {
       if (database.table) {
         setIsLoading(true);
         try {
-          const columns = await api.getColumns(database.table);
+          const columns = await api.getColumns();
           setAvailableColumns(columns);
         } catch (error) {
           console.error("Error loading columns:", error);
@@ -118,7 +118,7 @@ const ProcessStep = () => {
     }
   };
 
-  const handleFeatureToggle = (column) => {
+  const handleFeatureToggle = (column: string) => {
     const features = [...process.features];
     if (features.includes(column)) {
       setProcess({
@@ -138,148 +138,157 @@ const ProcessStep = () => {
   };
 
   return (
-    <div ref={componentRef} className="workflow-step max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-lg">
-      <h2 className="text-3xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-indigo-800 to-blue-600">Process Data</h2>
+    <div ref={componentRef} className="workflow-step max-w-6xl mx-auto p-8 bg-white rounded-xl shadow-lg">
+      <h2 className="text-3xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-indigo-800 to-blue-600">
+        Process Data
+      </h2>
 
-      {/* Engaging loader */}
       {isLoading && <WaveBarsLoader />}
 
       <form
-        className={`space-y-8 ${isLoading ? "pointer-events-none opacity-60" : ""}`}
+        className={`${isLoading ? "pointer-events-none opacity-60" : ""}`}
         onSubmit={e => {
           e.preventDefault();
           handleProcess();
         }}
         aria-disabled={isLoading}
       >
-        <div className="space-y-4">
-          <label className="text-lg font-medium text-gray-700">Time Column</label>
-          <p className="text-sm text-gray-500 mb-2">
-            Select the column containing date/time values
-          </p>
-          <Select
-            value={process.timeColumn}
-            onValueChange={(value) => setProcess({ ...process, timeColumn: value })}
-            disabled={isLoading}
-          >
-            <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
-              <SelectValue placeholder="Select time column" />
-            </SelectTrigger>
-            <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
-              {availableColumns
-                .filter(
-                  (col) =>
-                    col.toLowerCase().includes("month") ||
-                    col.toLowerCase().includes("date") ||
-                    col.toLowerCase().includes("time")
-                )
-                .map((column) => (
-                  <SelectItem key={column} value={column} className="hover:bg-indigo-50 cursor-pointer">
-                    {column}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-4">
-          <label className="text-lg font-medium text-gray-700">Target Variable</label>
-          <Select
-            value={process.targetVariable}
-            onValueChange={(value) => setProcess({ ...process, targetVariable: value })}
-            disabled={isLoading}
-          >
-            <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
-              <SelectValue placeholder="Select target variable" />
-            </SelectTrigger>
-            <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
-              {availableColumns
-                .filter(
-                  (col) =>
-                    !col.toLowerCase().includes("date") &&
-                    !col.toLowerCase().includes("time") &&
-                    col !== process.timeColumn
-                )
-                .map((column) => (
-                  <SelectItem key={column} value={column} className="hover:bg-indigo-50 cursor-pointer">
-                    {column}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-4">
-          <label className="text-lg font-medium text-gray-700">Time Frequency</label>
-          <div className="space-y-2">
-            <Select
-              value={process.frequency}
-              onValueChange={(value) =>
-                setProcess({ ...process, frequency: value as "daily" | "weekly" | "monthly" })
-              }
-              disabled={isLoading}
-            >
-              <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
-                <SelectValue placeholder="Select frequency" />
-              </SelectTrigger>
-              <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
-                <SelectItem value="daily" className="hover:bg-indigo-50 cursor-pointer">Daily</SelectItem>
-                <SelectItem value="weekly" className="hover:bg-indigo-50 cursor-pointer">Weekly</SelectItem>
-                <SelectItem value="monthly" className="hover:bg-indigo-50 cursor-pointer">Monthly</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {(process.frequency === 'weekly' || process.frequency === 'monthly') && (
+        <div className="grid grid-cols-2 gap-8">
+          {/* Left Column */}
+          <div className="space-y-6">
+            {/* Time Column Selection */}
+            <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
+              <label className="text-lg font-medium text-gray-700 block mb-2">Time Column</label>
+              <p className="text-sm text-gray-500 mb-3">
+                Select the column containing date/time values
+              </p>
               <Select
-                value={process.aggregationMethod}
-                onValueChange={(value) =>
-                  setProcess({ ...process, aggregationMethod: value as "mean" | "sum" | "max" | "min" })
-                }
+                value={process.timeColumn}
+                onValueChange={(value) => setProcess({ ...process, timeColumn: value })}
                 disabled={isLoading}
               >
-                <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
-                  <SelectValue placeholder="Select aggregation method" />
+                <SelectTrigger className="w-full h-12 bg-white border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
+                  <SelectValue placeholder="Select time column" />
                 </SelectTrigger>
                 <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
-                  <SelectItem value="mean" className="hover:bg-indigo-50 cursor-pointer">Mean (Average)</SelectItem>
-                  <SelectItem value="sum" className="hover:bg-indigo-50 cursor-pointer">Sum</SelectItem>
-                  <SelectItem value="max" className="hover:bg-indigo-50 cursor-pointer">Maximum</SelectItem>
-                  <SelectItem value="min" className="hover:bg-indigo-50 cursor-pointer">Minimum</SelectItem>
+                  {availableColumns
+                    .filter(col => 
+                      col.toLowerCase().includes("month") ||
+                      col.toLowerCase().includes("date") ||
+                      col.toLowerCase().includes("time")
+                    )
+                    .map((column) => (
+                      <SelectItem key={column} value={column} className="hover:bg-indigo-50 cursor-pointer">
+                        {column}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
-            )}
-          </div>
-        </div>
+            </div>
 
-        <div className="space-y-4">
-          <label className="text-lg font-medium text-gray-700">Additional Features</label>
-          <div className="bg-gray-50 p-6 rounded-lg border-2 border-gray-200 max-h-48 overflow-y-auto space-y-3">
-            {availableColumns
-              .filter(
-                (col) =>
-                  col !== process.timeColumn && col !== process.targetVariable
-              )
-              .map((column) => (
-                <div key={column} className="flex items-center space-x-3">
-                  <Checkbox
-                    id={`feature-${column}`}
-                    checked={process.features.includes(column)}
-                    onCheckedChange={() => handleFeatureToggle(column)}
+            {/* Target Variable Selection */}
+            <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
+              <label className="text-lg font-medium text-gray-700 block mb-2">Target Variable</label>
+              <Select
+                value={process.targetVariable}
+                onValueChange={(value) => setProcess({ ...process, targetVariable: value })}
+                disabled={isLoading}
+              >
+                <SelectTrigger className="w-full h-12 bg-white border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
+                  <SelectValue placeholder="Select target variable" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
+                  {availableColumns
+                    .filter(col =>
+                      !col.toLowerCase().includes("date") &&
+                      !col.toLowerCase().includes("time") &&
+                      col !== process.timeColumn
+                    )
+                    .map((column) => (
+                      <SelectItem key={column} value={column} className="hover:bg-indigo-50 cursor-pointer">
+                        {column}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Time Frequency Selection */}
+            <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200">
+              <label className="text-lg font-medium text-gray-700 block mb-2">Time Frequency</label>
+              <div className="space-y-3">
+                <Select
+                  value={process.frequency}
+                  onValueChange={(value) =>
+                    setProcess({ ...process, frequency: value as "daily" | "weekly" | "monthly" })
+                  }
+                  disabled={isLoading}
+                >
+                  <SelectTrigger className="w-full h-12 bg-white border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
+                    <SelectValue placeholder="Select frequency" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
+                    <SelectItem value="daily" className="hover:bg-indigo-50 cursor-pointer">Daily</SelectItem>
+                    <SelectItem value="weekly" className="hover:bg-indigo-50 cursor-pointer">Weekly</SelectItem>
+                    <SelectItem value="monthly" className="hover:bg-indigo-50 cursor-pointer">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {(process.frequency === 'weekly' || process.frequency === 'monthly') && (
+                  <Select
+                    value={process.aggregationMethod}
+                    onValueChange={(value) =>
+                      setProcess({ ...process, aggregationMethod: value as "mean" | "sum" | "max" | "min" })
+                    }
                     disabled={isLoading}
-                    className="h-5 w-5 border-2 border-gray-300 rounded-md checked:bg-indigo-600 checked:border-indigo-600 focus:ring-2 focus:ring-indigo-200"
-                  />
-                  <label
-                    htmlFor={`feature-${column}`}
-                    className="text-sm font-medium text-gray-700 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                   >
-                    {column}
-                  </label>
-                </div>
-              ))}
+                    <SelectTrigger className="w-full h-12 bg-white border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
+                      <SelectValue placeholder="Select aggregation method" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
+                      <SelectItem value="mean" className="hover:bg-indigo-50 cursor-pointer">Mean (Average)</SelectItem>
+                      <SelectItem value="sum" className="hover:bg-indigo-50 cursor-pointer">Sum</SelectItem>
+                      <SelectItem value="max" className="hover:bg-indigo-50 cursor-pointer">Maximum</SelectItem>
+                      <SelectItem value="min" className="hover:bg-indigo-50 cursor-pointer">Minimum</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column - Additional Features */}
+          <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 h-full">
+            <label className="text-lg font-medium text-gray-700 block mb-4">Additional Features</label>
+            <div className="grid grid-cols-2 gap-4">
+              {availableColumns
+                .filter(col => 
+                  col !== process.timeColumn && 
+                  col !== process.targetVariable
+                )
+                .map((column) => (
+                  <div key={column} className="flex items-center space-x-3 bg-white p-3 rounded-lg border border-gray-200">
+                    <Checkbox
+                      id={`feature-${column}`}
+                      checked={process.features.includes(column)}
+                      onCheckedChange={() => handleFeatureToggle(column)}
+                      disabled={isLoading}
+                      className="h-5 w-5 border-2 border-gray-300 rounded-md checked:bg-indigo-600 checked:border-indigo-600 focus:ring-2 focus:ring-indigo-200"
+                    />
+                    <label
+                      htmlFor={`feature-${column}`}
+                      className="text-sm font-medium text-gray-700 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      {column}
+                    </label>
+                  </div>
+                ))}
+            </div>
           </div>
         </div>
 
-        <div className="flex justify-between pt-6">
+        {/* Navigation Buttons */}
+        <div className="flex justify-between mt-8 pt-6 border-t border-gray-200">
           <Button 
             onClick={handleBack} 
             variant="outline" 
