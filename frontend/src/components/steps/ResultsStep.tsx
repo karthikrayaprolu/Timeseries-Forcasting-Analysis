@@ -61,22 +61,34 @@ const ResultsStep = () => {
   }
 
   // Format data for the chart
-  const chartData = results.forecasts?.dates?.map((date, index) => {
-    const actualValue = results.forecasts?.actual?.[index];
-    const predictedValue = results.forecasts?.predicted?.[index];
-    return {
-      date: date?.slice(0, 7) || '',
-      Actual: actualValue !== null && actualValue !== undefined ? Number(actualValue) : null,
-      Predicted: predictedValue !== null && predictedValue !== undefined ? Number(predictedValue) : null,
-    };
-  }).filter(data => data.Actual !== null || data.Predicted !== null) || [];
+  const chartData = React.useMemo(() => {
+    if (!results?.dates?.length) return [];
+    return results.dates.map((date, index) => ({
+      date: (date || '').slice(0, 7) || '',
+      Actual: Number(results.actual?.[index] ?? 0),
+      Predicted: Number(results.forecasts?.[index] ?? 0),
+    }));
+  }, [results?.dates, results?.actual, results?.forecasts]);
 
   const handleExport = async (format: 'csv' | 'excel' | 'json') => {
-    if (isLoading) return;
+    if (isLoading || !results) return;
     
     setIsLoading(true);
     try {
-      await api.exportResults(format, results);
+      const exportData = {
+        Results: {
+          modelInfo: results.modelInfo,
+          metrics: results.metrics,
+          data: results.dates.map((date, i) => ({
+            date,
+            actual: results.actual[i],
+            forecast: results.forecasts[i],
+            error: results.actual[i] - results.forecasts[i]
+          }))
+        }
+      };
+      
+      await api.exportResults(format, exportData);
       toast.success(`Results exported successfully as ${format.toUpperCase()}`);
     } catch (error) {
       console.error("Export error:", error);
@@ -159,7 +171,7 @@ const ResultsStep = () => {
           ))}
         </div>
         
-        {/* Forecast Chart */}
+        {/* Forecast Chart
         <Card className="shadow-lg border-2 border-gray-200">
           <CardHeader className="space-y-2">
             <CardTitle className="text-xl font-semibold text-gray-800">Forecast Visualization</CardTitle>
@@ -213,7 +225,7 @@ const ResultsStep = () => {
               </ResponsiveContainer>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Export Card */}
         <Card className="shadow-lg border-2 border-gray-200">

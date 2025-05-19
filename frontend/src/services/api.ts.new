@@ -1,0 +1,114 @@
+// API service for Time Series Forecasting
+import axios from 'axios';
+import { ModelConfig } from '@/contexts/WorkflowContext';
+
+const BASE_URL = 'http://localhost:5000/api';
+
+const apiClient = axios.create({
+  baseURL: BASE_URL,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+export const api = {
+  // File upload
+  uploadCsvFile: async (formData: FormData) => {
+    const response = await apiClient.post('/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  // Get available tables for a database type
+  getTables: async (databaseType: string) => {
+    if (databaseType === 'local') {
+      return ['uploaded_csv'];
+    }
+    const response = await apiClient.get(`/tables?type=${databaseType}`);
+    return response.data.columns;
+  },
+
+  // Get columns for a selected table
+  getColumns: async (table: string) => {
+    const response = await apiClient.get(`/columns?table=${table}`);
+    return response.data.columns;
+  },
+
+  // Process data with configuration
+  processData: async (config: {
+    timeColumn: string;
+    targetVariable: string;
+    frequency: string;
+    features: string[];
+  }) => {
+    const response = await apiClient.post('/process', config);
+    return response.data;
+  },
+
+  // Train model with configuration
+  trainModel: async (config: ModelConfig & { 
+    timeSteps?: number;
+    units?: number;
+    epochs?: number;
+    batchSize?: number;
+    changepoint_prior_scale?: number;
+    seasonality_prior_scale?: number;
+  }) => {
+    const response = await apiClient.post('/train', {
+      modelType: config.modelType,
+      hyperparameterTuning: config.hyperparameterTuning,
+      timeSteps: config.timeSteps || 12,
+      units: config.units || 50,
+      epochs: config.epochs || 100,
+      batchSize: config.batchSize || 32,
+      changepoint_prior_scale: config.changepoint_prior_scale || 0.05,
+      seasonality_prior_scale: config.seasonality_prior_scale || 10,
+      ensembleLearning: config.ensembleLearning,
+      transferLearning: config.transferLearning
+    });
+    
+    const { data } = response;
+    return {
+      dataInfo: {
+        title: "Time Series Forecast",
+        filename: "forecast_data"
+      },
+      modelInfo: {
+        type: config.modelType,
+        parameters: data.parameters || {},
+        features: {
+          hyperparameterTuning: config.hyperparameterTuning,
+          transferLearning: config.transferLearning,
+          ensembleLearning: config.ensembleLearning
+        }
+      },
+      metrics: data.metrics,
+      dates: data.dates,
+      actual: data.actual,
+      forecasts: data.forecasts
+    };
+  },
+
+  // Export results
+  exportResults: async (format: 'csv' | 'excel' | 'json', data: any) => {
+    const response = await apiClient.post('/export', {
+      format,
+      data
+    }, {
+      responseType: 'blob'
+    });
+    
+    // Create and trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `forecast_results.${format}`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+};

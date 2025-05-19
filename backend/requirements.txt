@@ -1,0 +1,12 @@
+flask
+flask-cors
+pandas
+numpy
+joblib
+statsmodels
+prophet
+tensorflow
+scikit-learn
+xgboost
+openpyxl
+xlsxwriter
