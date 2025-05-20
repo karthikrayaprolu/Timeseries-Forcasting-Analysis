@@ -10,3 +10,5 @@ scikit-learn
 xgboost
 openpyxl
 xlsxwriter
+fastapi
+uvicorn

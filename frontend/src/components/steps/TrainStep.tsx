@@ -74,6 +74,7 @@ const LoadingRobot = () => (
 
 const TrainStep = () => {
   const {
+    process,
     model,
     setModel,
     setCurrentStep,
@@ -144,59 +145,70 @@ const TrainStep = () => {
   ];
 
   const handleTrain = async () => {
-    setIsLoading(true);
-    try {
-      // Add model-specific parameters based on the selected model type
-      let modelParams: any = {};      switch (model.modelType) {
-        case 'lstm':
-          modelParams = {
-            units: model.units || 50,
-            dropout: model.dropout || 0.2,
-            epochs: model.epochs || 100,
-            batch_size: model.batchSize || 32,
-            sequence_length: model.timeSteps || 10
-          };
-          break;
-        case 'random_forest':
-        case 'xgboost':
-          modelParams = {
-            n_estimators: model.n_estimators || 100,
-            max_depth: model.max_depth || 6,
-            learning_rate: model.learning_rate || 0.1 // for xgboost
-          };
-          break;
-        case 'arima':
-          modelParams = {
-            order: [1, 1, 1] // Default ARIMA parameters
-          };
-          break;
-        case 'prophet':
-          modelParams = {
-            changepoint_prior_scale: 0.05,
-            seasonality_prior_scale: 10,
-            seasonality_mode: 'additive'
-          };
-          break;
-      }      const response = await api.trainModel({
-        ...model,
-        ...modelParams,
-        sourceModelId: model.transferLearning ? selectedSourceModel : undefined
-      });
-
-      if (!response || response.error) {
-        throw new Error(response?.error || 'Training failed');
-      }
-
-      setResults(response);
-      setCurrentStep("results");
-      toast.success("Training completed successfully!");
-    } catch (error) {
-      console.error('Training error:', error);
-      toast.error("Training failed: " + (error instanceof Error ? error.message : String(error)));
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  try {
+    let modelParams: any = {};
+    
+    switch (model.modelType) {
+      case 'lstm':
+        modelParams = {
+          units: model.units ?? 50,
+          dropout: model.dropout ?? 0.2,
+          epochs: model.epochs ?? 100,
+          batch_size: model.batchSize ?? 32,
+          sequence_length: model.sequence_length ?? 10
+        };
+        break;
+      case 'random_forest':
+      case 'xgboost':
+        modelParams = {
+          n_estimators: model.n_estimators ?? 100,
+          max_depth: model.max_depth ?? 6,
+          learning_rate: model.learning_rate ?? 0.1
+        };
+        break;
+      case 'arima':
+        modelParams = {
+          order: model.order ?? [1, 1, 1]
+        };
+        break;
+      case 'prophet':
+        modelParams = {
+          changepoint_prior_scale: model.changepoint_prior_scale ?? 0.05,
+          seasonality_prior_scale: model.seasonality_prior_scale ?? 10,
+          seasonality_mode: model.seasonality_mode ?? 'additive'
+        };
+        break;
     }
-  };
+
+  const payload = {
+      ...model,
+      ...modelParams,
+      sourceModelId: model.transferLearning ? selectedSourceModel : null,
+      timeColumn:process.timeColumn,
+      targetVariable: process.targetVariable,
+      frequency: process.frequency,
+    };
+
+    console.log('Sending payload:', payload);
+    console.log(JSON.stringify(payload, null, 2));
+    
+    const response = await api.trainModel(payload);
+
+    if (!response || response.error) {
+      throw new Error(response?.error || 'Training failed');
+    }
+
+    setResults(response);
+    setCurrentStep("results");
+    toast.success("Training completed successfully!");
+  } catch (error) {
+    console.error('Training error:', error);
+    toast.error("Training failed: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleBack = () => {
     setCurrentStep("process");

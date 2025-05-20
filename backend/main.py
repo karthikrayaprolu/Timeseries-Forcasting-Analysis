@@ -763,7 +763,6 @@ def create_ensemble_model(train, test, config):
 async def train_model(config: DataConfig):
     if processed_data is None:
         raise HTTPException(status_code=404, detail="No processed data available. Please process data first.")
-    
     df = processed_data['data']
     target = processed_data['config']['target']
     
@@ -784,7 +783,8 @@ async def train_model(config: DataConfig):
                     'ensembleModels': selected_models,
                     'ensembleMethod': config.ensembleMethod,
                     'ensembleWeights': config.ensembleWeights,
-                    **config.dict()
+                    **config.model_dump()
+
                 }
             )
             
@@ -798,18 +798,24 @@ async def train_model(config: DataConfig):
             }
         else:
             if config.hyperparameterTuning:
-                params, model = tune_hyperparameters(config.modelType, train, test, config.dict())
+                params, model = tune_hyperparameters(config.modelType, train, test, config.model_dump()
+)
             else:
                 if config.modelType == 'arima':
-                    params, model = train_arima(train, test, config.dict())
+                    params, model = train_arima(train, test, config.model_dump()
+)
                 elif config.modelType == 'prophet':
-                    params, model = train_prophet(train, test, config.dict())
+                    params, model = train_prophet(train, test, config.model_dump()
+)
                 elif config.modelType == 'lstm':
-                    params, model = train_lstm(train, config.dict())
+                    params, model = train_lstm(train, config.model_dump()
+)
                 elif config.modelType == 'random_forest':
-                    params, model = train_random_forest(train, test, config.dict())
+                    params, model = train_random_forest(train, test, config.model_dump()
+)
                 elif config.modelType == 'xgboost':
-                    params, model = train_xgboost(train, test, config.dict())
+                    params, model = train_xgboost(train, test, config.model_dump()
+)
                 else:
                     raise HTTPException(status_code=400, detail=f"Unknown model type: {config.modelType}")
 
@@ -820,7 +826,8 @@ async def train_model(config: DataConfig):
                 source_config = trained_models[source_model_id]['config']
                 source_target = trained_models[source_model_id]['target']
                 
-                transferred_model = apply_transfer_learning(source_model, train, config.dict())
+                transferred_model = apply_transfer_learning(source_model, train, config.model_dump()
+)
                 
                 if transferred_model is not None:
                     if isinstance(transferred_model, Model):
@@ -893,7 +900,8 @@ async def train_model(config: DataConfig):
                         'source_model': source_model_id,
                         'source_config': source_config,
                         'source_target': source_target,
-                        **config.dict()
+                        **config.model_dump()
+
                     }
                     
                     if isinstance(model, Model):
@@ -902,11 +910,14 @@ async def train_model(config: DataConfig):
                 else:
                     print("Transfer learning failed, falling back to regular training")
                     if config.modelType == 'lstm':
-                        params, model = train_lstm(train, config.dict())
+                        params, model = train_lstm(train, config.model_dump()
+)
                     elif config.modelType == 'random_forest':
-                        params, model = train_random_forest(train, test, config.dict())
+                        params, model = train_random_forest(train, test, config.model_dump()
+)
                     elif config.modelType == 'xgboost':
-                        params, model = train_xgboost(train, test, config.dict())
+                        params, model = train_xgboost(train, test, config.model_dump()
+)
             
         if config.ensembleLearning:
             X_test = test.drop(columns=[target])
@@ -956,7 +967,8 @@ async def train_model(config: DataConfig):
         trained_models[model_id] = {
             'model': model,
             'params': params,
-            'config': config.dict(),
+            'config': config.model_dump()
+,
             'train_data': train,
             'test_data': test,
             'target': target,

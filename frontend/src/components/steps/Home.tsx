@@ -1,16 +1,17 @@
-import React, { useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Rocket, Database, LineChart, Settings, ChevronRight } from "lucide-react";
-import { useWorkflow } from "@/contexts/WorkflowContext";
+import { Rocket, Database, LineChart, Settings, ChevronRight, User } from "lucide-react";
+import { useWorkflow, WorkflowStep } from "@/contexts/WorkflowContext";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { lazy, Suspense } from "react";
-
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 // Dynamic import for heavier animation components
 const AnimatedChart = lazy(() => import('../AnimatedChart'));
 
 const Home = () => {
   const navigate = useNavigate();
+  const {user} = useAuth();
   const { setCurrentStep } = useWorkflow();
 
   // Animation variants
@@ -22,6 +23,14 @@ const Home = () => {
   const slideUp = {
     hidden: { y: 20, opacity: 0 },
     visible: { y: 0, opacity: 1, transition: { duration: 0.6 } }
+  };
+const handleStepChange = (step: WorkflowStep) => {
+    if (!user && step !== "home") {
+      toast.error("Please login to access this feature");
+      navigate('/auth/login');
+      return;
+    }
+    setCurrentStep(step);
   };
 
   return (
@@ -50,7 +59,7 @@ const Home = () => {
           <motion.div variants={slideUp} className="flex flex-col sm:flex-row justify-center gap-4">
             <Button 
               className="bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-700 hover:to-blue-600 px-8 py-6 text-lg text-white shadow-lg hover:shadow-xl transition-all"
-              onClick={() => setCurrentStep("database")}
+              onClick={() => handleStepChange("database")}
             >
               <Rocket className="mr-2" />
               Get Started

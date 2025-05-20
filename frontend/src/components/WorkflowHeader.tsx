@@ -52,10 +52,10 @@ const WorkflowHeader = () => {
     }
   }, []);
 
-  const handleStepChange = (step: WorkflowStep) => {
-    if (!user && step.id !== "home") {
+const handleStepChange = (step: WorkflowStep) => {
+    if (!user && step !== "home") {
       toast.error("Please login to access this feature");
-      navigate('/login');
+      navigate('/auth/login');
       return;
     }
     setCurrentStep(step);
