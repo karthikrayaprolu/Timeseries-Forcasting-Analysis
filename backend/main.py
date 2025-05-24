@@ -288,24 +288,30 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
         X = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X.copy()
         all_predictions = []
         successful_models = []
-        X = X.copy()
+
         if hasattr(self, 'feature_names_'):
             for feature in self.feature_names_:
                 if feature not in X.columns:
                     X[feature] = 0
             X = X[self.feature_names_]
 
-        
         for i, model in enumerate(self.models):
             try:
+                pred = None  # Safe default to avoid uninitialized use
+
                 if isinstance(model, SARIMAXResultsWrapper):
                     steps = len(X)
                     pred = model.get_forecast(steps=steps).predicted_mean.values
+
                 elif isinstance(model, Prophet):
                     future_dates = pd.DataFrame({'ds': X.index})
+                    future_dates['ds'] = pd.to_datetime(future_dates['ds'], errors='coerce')
+                    if future_dates['ds'].isnull().any():
+                        raise ValueError("Invalid dates in Prophet future_dates")
                     forecast = model.predict(future_dates)
                     pred = forecast['yhat'].values
-                elif isinstance(model, Model):
+
+                elif isinstance(model, Model):  # LSTM
                     sequence_length = getattr(model, 'sequence_length', 10)
                     scaler = self.scalers.get(i)
                     if scaler is not None:
@@ -314,47 +320,54 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                         sequences, _ = prepare_sequence_data(X_scaled_df, processed_data['config']['target'], sequence_length)
                         if len(sequences) == 0:
                             raise ValueError("Not enough data for LSTM prediction")
-                        
                         pred = model.predict(sequences, verbose=0).flatten()
                         pred = pred[:len(X)]
                         dummy = np.zeros((len(pred), X.shape[1]))
                         target_idx = X.columns.get_loc(processed_data['config']['target'])
                         dummy[:, target_idx] = pred
                         pred = scaler.inverse_transform(dummy)[:, target_idx]
-                else:
+
+                else:  # RandomForest, XGBoost
                     scaler = self.scalers.get(i)
                     if scaler is not None:
                         X_scaled = scaler.transform(X)
-                        if isinstance(model, SARIMAXResultsWrapper):
-                            pred = model.get_forecast(steps=len(X)).predicted_mean.values
-                        
+                        pred = model.predict(X_scaled)
                     else:
                         pred = model.predict(X.to_numpy())
-                
+
+                if pred is None:
+                    raise ValueError("Prediction returned None")
+
                 pred = np.asarray(pred).flatten()
                 if len(pred) > 0 and not np.any(np.isnan(pred)):
                     all_predictions.append(pred)
                     successful_models.append(i)
                     print(f"Model {i} ({type(model).__name__}) - prediction success. Length: {len(pred)}")
+                else:
+                    raise ValueError("Prediction invalid or contains NaN values")
+
             except Exception as e:
                 print(f"Error in model {i} ({type(model).__name__}) prediction: {str(e)}")
                 traceback.print_exc()
                 continue
-        
+
         if not all_predictions:
             raise ValueError("No valid predictions from any model")
-        
+
+    # Truncate predictions to common length
         min_length = min(len(p) for p in all_predictions)
         predictions = np.array([p[:min_length] for p in all_predictions])
-        
+
         if self.method == 'voting':
             weights = np.array([self.weights[i] for i in successful_models])
             weights = weights / weights.sum()
             return np.average(predictions, axis=0, weights=weights)
         elif self.method == 'stacking':
+        # You can improve this by adding a trained meta-learner
             return predictions[0]
         else:
             return np.mean(predictions, axis=0)
+
         
 def evaluate_model(model, train, test, model_type):
     try:
@@ -547,7 +560,7 @@ def train_random_forest(train, test, config):
         'max_depth': config.get('max_depth', 10),
         'random_state': 42
     }
-    model = RandomForestRegressor(**params)
+    model = RandomForestRegressor(warm_start=True,**params, n_jobs=-1)
     X_train = train.drop(columns=[processed_data['config']['target']])
     y_train = train[processed_data['config']['target']]
     model.fit(X_train.values, y_train)
@@ -561,7 +574,7 @@ def train_xgboost(train, test, config):
         'objective': 'reg:squarederror',
         'random_state': 42
     }
-    model = XGBRegressor(**params)
+    model = XGBRegressor(**params, n_jobs=-1)
     X_train = train.drop(columns=[processed_data['config']['target']])
     y_train = train[processed_data['config']['target']]
     model.fit(X_train.values, y_train)
@@ -725,6 +738,8 @@ def apply_transfer_learning(source_model, train_data, config):
 def create_ensemble_model(train, test, config):
     print("Creating ensemble model...")
     base_models = []
+    model_errors = []
+
     model_mapping = {
         'arima': 'ARIMA',
         'prophet': 'Prophet',
@@ -742,24 +757,28 @@ def create_ensemble_model(train, test, config):
         try:
             if model_type == 'ARIMA':
                 _, model = train_arima(train, test, config)
-                base_models.append(('arima', model))
+        
             elif model_type == 'Prophet':
                 _, model = train_prophet(train, test, config)
-                base_models.append(('prophet', model))
+                
             elif model_type == 'LSTM':
                 _, model = train_lstm(train, config)
                 model.target_column = target
-                base_models.append(('lstm', model))
+                
             elif model_type == 'RandomForest':
                 X_train = train.drop(columns=[target])
                 y_train = train[target]
                 _, model = train_random_forest(train, test, config)
-                base_models.append(('rf', model))
+    
             elif model_type == 'XGBoost':
                 X_train = train.drop(columns=[target])
                 y_train = train[target]
                 _, model = train_xgboost(train, test, config)
-                base_models.append(('xgb', model))
+
+            base_models.append((model_type.lower(), model))  # keep the lowercase name for traceability
+            rmse = evaluate_model(model, train, test, model_type.lower()).get('rmse', np.inf)
+            model_errors.append(rmse)
+
         except Exception as e:
             print(f"Error training {model_type}: {str(e)}")
             traceback.print_exc()
@@ -768,21 +787,14 @@ def create_ensemble_model(train, test, config):
     if not base_models:
         raise ValueError("No models were successfully trained for the ensemble")
         
-    ensemble_method = config.get('ensembleMethod', 'voting')
-    if ensemble_method == 'voting':
-        weights = config.get('ensembleWeights', None)
-        ensemble = EnsembleTimeSeriesModel(
-            [model for _, model in base_models],
-            weights=weights,
-            method='voting'
-        )
-    else:
-        meta_regressor = RandomForestRegressor(n_estimators=100)
-        ensemble = StackingRegressor(
-            estimators=base_models,
-            final_estimator=meta_regressor
-        )
-    
+    weights = np.array([1 / (e + 1e-6) for e in model_errors])
+    weights = weights / weights.sum()
+
+    ensemble = EnsembleTimeSeriesModel(
+    [model for _, model in base_models],
+    weights=weights.tolist(),
+    method='voting'
+)
     ensemble.base_models = base_models
     return ensemble
 
@@ -945,7 +957,7 @@ async def train_model(config: DataConfig):
                         X_test[feature] = 0  # default fill
                 X_test = X_test[model.feature_names_]  # correct order
 
-            predictions = model.predict(X_test)
+       
 
         else:
             if config.modelType == 'arima':

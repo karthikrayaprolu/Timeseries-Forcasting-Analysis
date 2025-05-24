@@ -160,6 +160,11 @@ const TrainStep = () => {
         };
         break;
       case 'random_forest':
+        modelParams = {
+          n_estimators: model.n_estimators ?? 100,
+          max_depth: model.max_depth ?? 10
+                  };
+        break;
       case 'xgboost':
         modelParams = {
           n_estimators: model.n_estimators ?? 100,
@@ -180,19 +185,29 @@ const TrainStep = () => {
         };
         break;
     }
+let ensembleModels = model.ensembleModels || [];
+if (model.ensembleLearning && !ensembleModels.includes(model.modelType)) {
+  ensembleModels = [...ensembleModels, model.modelType];
+}
+if (model.ensembleLearning && ensembleModels.length === 0) {
+  toast.warning("Please select at least one additional model for ensemble.");
+  setIsLoading(false);
+  return;
+}
 
   const payload = {
-      ...model,
-      ...modelParams,
-      sourceModelId: model.transferLearning ? selectedSourceModel : null,
-      timeColumn:process.timeColumn,
-      targetVariable: process.targetVariable,
-      frequency: process.frequency,
-    };
+  ...model,
+  ...modelParams,
+  sourceModelId: model.transferLearning ? selectedSourceModel : null,
+  timeColumn: process.timeColumn,
+  targetVariable: process.targetVariable,
+  frequency: process.frequency,
+  ensembleModels: model.ensembleLearning ? ensembleModels : undefined,
+};
 
     console.log('Sending payload:', payload);
     console.log(JSON.stringify(payload, null, 2));
-    
+
     const response = await api.trainModel(payload);
 
     if (!response || response.error) {
@@ -243,14 +258,39 @@ const TrainStep = () => {
               <label>Sequence Length</label>
               <input
                 type="number"
-                value={model.timeSteps || 10}
+                value={model.sequence_length || 10}
+onChange={(e) => setModel({ ...model, sequence_length: parseInt(e.target.value) })}
                 onChange={(e) => setModel({...model, timeSteps: parseInt(e.target.value)})}
                 className="w-24 px-2 py-1 border rounded"
               />
             </div>
           </div>
         );
+      
       case 'random_forest':
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <label>Number of Estimators</label>
+            <input
+              type="number"
+              value={model.n_estimators || 100}
+              onChange={(e) => setModel({...model, n_estimators: parseInt(e.target.value)})}
+              className="w-24 px-2 py-1 border rounded"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <label>Max Depth</label>
+            <input
+              type="number"
+              value={model.max_depth || 10}
+              onChange={(e) => setModel({...model, max_depth: parseInt(e.target.value)})}
+              className="w-24 px-2 py-1 border rounded"
+            />
+          </div>
+        </div>
+      );
+
       case 'xgboost':
         return (
           <div className="space-y-4">
@@ -366,25 +406,60 @@ const TrainStep = () => {
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <label htmlFor="ensemble" className="text-base font-medium text-gray-700">
-                  Ensemble Learning
-                </label>
-                <p className="text-sm text-gray-500">
-                  Combine multiple models for better performance
-                </p>
-              </div>
-              <Switch
-                id="ensemble"
-                checked={model.ensembleLearning}
-                onCheckedChange={(checked) =>
-                  setModel({ ...model, ensembleLearning: checked })
+          <div className="flex items-center justify-between"> 
+  <div className="space-y-1">
+    <label htmlFor="ensemble" className="text-base font-medium text-gray-700">
+      Ensemble Learning
+    </label>
+    <p className="text-sm text-gray-500">
+      Combine multiple models for better performance
+    </p>
+  </div>
+  <Switch
+    id="ensemble"
+    checked={model.ensembleLearning}
+    onCheckedChange={(checked) => {
+      setModel({ ...model, ensembleLearning: checked });
+    }}
+    disabled={isLoading}
+    className="data-[state=checked]:bg-indigo-600"
+  />
+</div>
+
+{/* Model multi-select for ensemble */}
+{model.ensembleLearning && (
+  <div className="mt-4 space-y-2">
+    <label className="text-sm font-medium text-gray-700">Select Models to Combine</label>
+    <div className="space-y-2">
+      {['arima', 'prophet', 'lstm', 'random_forest', 'xgboost']
+        .filter((m) => m !== model.modelType) // exclude selected main model
+        .map((m) => (
+          <div key={m} className="flex items-center">
+            <input
+              type="checkbox"
+              id={`ensemble-${m}`}
+              checked={model.ensembleModels?.includes(m)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                let updated = model.ensembleModels || [];
+                if (checked) {
+                  updated = [...updated, m];
+                } else {
+                  updated = updated.filter((item) => item !== m);
                 }
-                disabled={isLoading}
-                className="data-[state=checked]:bg-indigo-600"
-              />
-            </div>            <div className="space-y-4">
+                setModel({ ...model, ensembleModels: updated });
+              }}
+              className="mr-2"
+            />
+            <label htmlFor={`ensemble-${m}`} className="text-sm capitalize">
+              {m.replace('_', ' ')}
+            </label>
+          </div>
+        ))}
+    </div>
+  </div>
+)}
+           <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <label htmlFor="transfer" className="text-base font-medium text-gray-700">
