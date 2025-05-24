@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.statespace.sarimax import SARIMAX, SARIMAXResultsWrapper
 from prophet import Prophet
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization, Bidirectional, GlobalAveragePooling1D
@@ -217,7 +217,11 @@ def prepare_sequence_data(data, target_col, sequence_length):
     number_of_features = data.shape[1]
     for i in range(len(data) - sequence_length):
         sequence = data.iloc[i:i + sequence_length].values
-        target = data.iloc[i + sequence_length][target_col]
+        if target_col in data.columns:
+            target = data[target_col].iloc[i + sequence_length]
+        else:
+            raise KeyError(f"Target column '{target_col}' not found in data with columns: {data.columns.tolist()}")
+
         sequences.append(sequence)
         targets.append(target)
     return np.array(sequences), np.array(targets)
@@ -228,6 +232,7 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
         self.weights = weights if weights is not None else [1/len(models)] * len(models)
         self.method = method
         self.scalers = {}
+        self.feature_names_ = None
         
     def fit(self, X, y):
         X = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X.copy()
@@ -235,20 +240,27 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
         
         for i, model in enumerate(self.models):
             try:
-                if isinstance(model, SARIMAX):
+                if isinstance(model, SARIMAX) or isinstance(model, SARIMAXResultsWrapper):
                     continue
                 elif isinstance(model, Prophet):
                     continue
                 elif isinstance(model, Model):
                     sequence_length = getattr(model, 'sequence_length', 10)
                     self.scalers[i] = MinMaxScaler()
+                    if processed_data and 'target' in processed_data['config']:
+                        target_col = processed_data['config']['target']
+                        if target_col not in X.columns:
+                            X[target_col] = y
+
                     X_scaled = self.scalers[i].fit_transform(X)
                     X_scaled_df = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
+
                     sequences, targets = prepare_sequence_data(
                         X_scaled_df,
                         processed_data['config']['target'],
                         sequence_length
                     )
+                    self.feature_names_ = list(X.columns)
                     model.fit(
                         sequences, 
                         targets,
@@ -264,20 +276,31 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                     self.scalers[i] = MinMaxScaler()
                     X_scaled = self.scalers[i].fit_transform(X)
                     model.fit(X_scaled, y)
+
             except Exception as e:
                 print(f"Error fitting model {i} ({type(model).__name__}): {str(e)}")
                 traceback.print_exc()
+        
+        self.feature_names_ = list(X.columns)
         return self
 
     def predict(self, X):
         X = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X.copy()
         all_predictions = []
         successful_models = []
+        X = X.copy()
+        if hasattr(self, 'feature_names_'):
+            for feature in self.feature_names_:
+                if feature not in X.columns:
+                    X[feature] = 0
+            X = X[self.feature_names_]
+
         
         for i, model in enumerate(self.models):
             try:
-                if isinstance(model, SARIMAX):
-                    pred = model.get_forecast(len(X)).predicted_mean
+                if isinstance(model, SARIMAXResultsWrapper):
+                    steps = len(X)
+                    pred = model.get_forecast(steps=steps).predicted_mean.values
                 elif isinstance(model, Prophet):
                     future_dates = pd.DataFrame({'ds': X.index})
                     forecast = model.predict(future_dates)
@@ -288,13 +311,12 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                     if scaler is not None:
                         X_scaled = scaler.transform(X)
                         X_scaled_df = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
-                        sequences, _ = prepare_sequence_data(
-                            X_scaled_df,
-                            processed_data['config']['target'],
-                            sequence_length
-                        )
-                        pred = model.predict(sequences, verbose=0)
-                        pred = pred.flatten()[:len(X)]
+                        sequences, _ = prepare_sequence_data(X_scaled_df, processed_data['config']['target'], sequence_length)
+                        if len(sequences) == 0:
+                            raise ValueError("Not enough data for LSTM prediction")
+                        
+                        pred = model.predict(sequences, verbose=0).flatten()
+                        pred = pred[:len(X)]
                         dummy = np.zeros((len(pred), X.shape[1]))
                         target_idx = X.columns.get_loc(processed_data['config']['target'])
                         dummy[:, target_idx] = pred
@@ -303,7 +325,9 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                     scaler = self.scalers.get(i)
                     if scaler is not None:
                         X_scaled = scaler.transform(X)
-                        pred = model.predict(X_scaled)
+                        if isinstance(model, SARIMAXResultsWrapper):
+                            pred = model.get_forecast(steps=len(X)).predicted_mean.values
+                        
                     else:
                         pred = model.predict(X.to_numpy())
                 
@@ -311,6 +335,7 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                 if len(pred) > 0 and not np.any(np.isnan(pred)):
                     all_predictions.append(pred)
                     successful_models.append(i)
+                    print(f"Model {i} ({type(model).__name__}) - prediction success. Length: {len(pred)}")
             except Exception as e:
                 print(f"Error in model {i} ({type(model).__name__}) prediction: {str(e)}")
                 traceback.print_exc()
@@ -330,7 +355,7 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
             return predictions[0]
         else:
             return np.mean(predictions, axis=0)
-
+        
 def evaluate_model(model, train, test, model_type):
     try:
         actuals = test[processed_data['config']['target']].values
@@ -707,8 +732,10 @@ def create_ensemble_model(train, test, config):
         'random_forest': 'RandomForest',
         'xgboost': 'XGBoost'
     }
-    selected_models = [model_mapping.get(model, model) for model in config.get('ensembleModels', ['arima', 'lstm', 'xgboost'])]
-    
+    # selected_models = [model_mapping.get(model, model) for model in config.get('ensembleModels', ['arima', 'lstm', 'xgboost'])]
+    selected_models = [model_mapping.get(model, model) for model in config['ensembleModels']]
+    print(selected_models)
+
     target = processed_data['config']['target']
     
     for model_type in selected_models:
@@ -763,6 +790,7 @@ def create_ensemble_model(train, test, config):
 async def train_model(config: DataConfig):
     if processed_data is None:
         raise HTTPException(status_code=404, detail="No processed data available. Please process data first.")
+    
     df = processed_data['data']
     target = processed_data['config']['target']
     
@@ -773,7 +801,9 @@ async def train_model(config: DataConfig):
     try:
         if config.ensembleLearning:
             selected_models = config.ensembleModels
+            print(selected_models)
             if config.modelType not in selected_models:
+                print("Hello")
                 selected_models.append(config.modelType)
             
             ensemble = create_ensemble_model(
@@ -784,7 +814,6 @@ async def train_model(config: DataConfig):
                     'ensembleMethod': config.ensembleMethod,
                     'ensembleWeights': config.ensembleWeights,
                     **config.model_dump()
-
                 }
             )
             
@@ -798,24 +827,18 @@ async def train_model(config: DataConfig):
             }
         else:
             if config.hyperparameterTuning:
-                params, model = tune_hyperparameters(config.modelType, train, test, config.model_dump()
-)
+                params, model = tune_hyperparameters(config.modelType, train, test, config.model_dump())
             else:
                 if config.modelType == 'arima':
-                    params, model = train_arima(train, test, config.model_dump()
-)
+                    params, model = train_arima(train, test, config.model_dump())
                 elif config.modelType == 'prophet':
-                    params, model = train_prophet(train, test, config.model_dump()
-)
+                    params, model = train_prophet(train, test, config.model_dump())
                 elif config.modelType == 'lstm':
-                    params, model = train_lstm(train, config.model_dump()
-)
+                    params, model = train_lstm(train, config.model_dump())
                 elif config.modelType == 'random_forest':
-                    params, model = train_random_forest(train, test, config.model_dump()
-)
+                    params, model = train_random_forest(train, test, config.model_dump())
                 elif config.modelType == 'xgboost':
-                    params, model = train_xgboost(train, test, config.model_dump()
-)
+                    params, model = train_xgboost(train, test, config.model_dump())
                 else:
                     raise HTTPException(status_code=400, detail=f"Unknown model type: {config.modelType}")
 
@@ -826,8 +849,7 @@ async def train_model(config: DataConfig):
                 source_config = trained_models[source_model_id]['config']
                 source_target = trained_models[source_model_id]['target']
                 
-                transferred_model = apply_transfer_learning(source_model, train, config.model_dump()
-)
+                transferred_model = apply_transfer_learning(source_model, train, config.model_dump())
                 
                 if transferred_model is not None:
                     if isinstance(transferred_model, Model):
@@ -901,7 +923,6 @@ async def train_model(config: DataConfig):
                         'source_config': source_config,
                         'source_target': source_target,
                         **config.model_dump()
-
                     }
                     
                     if isinstance(model, Model):
@@ -910,18 +931,22 @@ async def train_model(config: DataConfig):
                 else:
                     print("Transfer learning failed, falling back to regular training")
                     if config.modelType == 'lstm':
-                        params, model = train_lstm(train, config.model_dump()
-)
+                        params, model = train_lstm(train, config.model_dump())
                     elif config.modelType == 'random_forest':
-                        params, model = train_random_forest(train, test, config.model_dump()
-)
+                        params, model = train_random_forest(train, test, config.model_dump())
                     elif config.modelType == 'xgboost':
-                        params, model = train_xgboost(train, test, config.model_dump()
-)
+                        params, model = train_xgboost(train, test, config.model_dump())
             
         if config.ensembleLearning:
-            X_test = test.drop(columns=[target])
+            X_test = test.copy()
+            if hasattr(model, 'feature_names_'):
+                for feature in model.feature_names_:
+                    if feature not in X_test.columns:
+                        X_test[feature] = 0  # default fill
+                X_test = X_test[model.feature_names_]  # correct order
+
             predictions = model.predict(X_test)
+
         else:
             if config.modelType == 'arima':
                 predictions = model.get_forecast(len(test)).predicted_mean
@@ -967,8 +992,7 @@ async def train_model(config: DataConfig):
         trained_models[model_id] = {
             'model': model,
             'params': params,
-            'config': config.model_dump()
-,
+            'config': config.model_dump(),
             'train_data': train,
             'test_data': test,
             'target': target,
