@@ -18,19 +18,37 @@ interface SourceModel {
   };
 }
 
-const fetchAvailableModels = async (setAvailableModels: (models: SourceModel[]) => void) => {
+const fetchAvailableModels = async (
+  setAvailableModels: (models: SourceModel[]) => void,
+  currentModelType: string
+) => {
   try {
-    const models = await api.getModels();
-    setAvailableModels(models);
-    if (models.length === 0) {
-      toast("No pre-trained models available yet", {
-        description: "Train a model first to use transfer learning"
+    const response = await api.getAvailableModels();
+    const models = response.data || response;
+
+    if (!Array.isArray(models)) {
+      throw new Error("Invalid response format from server");
+    }
+
+    // Filter models by type and ensure they belong to the current user
+    const compatibleModels = models.filter(m =>
+      m.type.toLowerCase() === currentModelType.toLowerCase()
+    );
+
+    setAvailableModels(compatibleModels);
+
+    if (compatibleModels.length === 0) {
+      toast.warning(`No compatible pre-trained ${currentModelType} models available`, {
+        description: `Train a ${currentModelType} model first to use transfer learning`
       });
     }
-    return models;
+
+    return compatibleModels;
   } catch (err) {
     console.error('Error fetching models:', err);
-    toast.error("Failed to fetch available models");
+    toast.error("Failed to fetch available models", {
+      description: err instanceof Error ? err.message : "Please check your connection"
+    });
     return [];
   }
 };
@@ -100,16 +118,25 @@ const TrainStep = () => {
 
   // Fetch available models when transfer learning is enabled
   useEffect(() => {
-    const fetchModels = async () => {
-      if (model.transferLearning) {
-        setIsLoading(true);
-        await fetchAvailableModels(setAvailableModels);
+  const fetchModels = async () => {
+    if (model.transferLearning) {
+      setIsLoading(true);
+      try {
+        const models = await fetchAvailableModels(setAvailableModels, model.modelType);
+        if (models.length > 0) {
+          setSelectedSourceModel(models[0].id);
+          setModel(prev => ({ ...prev, sourceModelId: models[0].id }));
+        }
+      } catch (error) {
+        console.error("Model fetch error:", error);
+      } finally {
         setIsLoading(false);
       }
-    };
-    fetchModels();
-  }, [model.transferLearning]);
-
+    }
+  };
+  fetchModels();
+}, [model.transferLearning, model.modelType]);
+// Add model.modelType to dependencies
   // Reset selected model when transfer learning is disabled
   useEffect(() => {
     if (!model.transferLearning) {
@@ -260,7 +287,7 @@ if (model.ensembleLearning && ensembleModels.length === 0) {
                 type="number"
                 value={model.sequence_length || 10}
 onChange={(e) => setModel({ ...model, sequence_length: parseInt(e.target.value) })}
-                onChange={(e) => setModel({...model, timeSteps: parseInt(e.target.value)})}
+                
                 className="w-24 px-2 py-1 border rounded"
               />
             </div>
@@ -480,32 +507,55 @@ onChange={(e) => setModel({ ...model, sequence_length: parseInt(e.target.value) 
                 />
               </div>
 
-              {model.transferLearning && (
-                <div className="mt-4 border-t pt-4">
-                  <Label htmlFor="sourceModel" className="mb-2 block">Source Model</Label>
-                  <Select
-                    value={selectedSourceModel}
-                    onValueChange={setSelectedSourceModel}
-                    disabled={isLoading || availableModels.length === 0}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select a source model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableModels.map((sourceModel) => (
-                        <SelectItem key={sourceModel.id} value={sourceModel.id}>
-                          {`${sourceModel.type} - ${sourceModel.target} (RMSE: ${sourceModel.metrics.rmse?.toFixed(2) ?? 'N/A'})`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {availableModels.length === 0 && (
-                    <p className="text-sm text-yellow-600 mt-2">
-                      No pre-trained models available. Train a model first to use transfer learning.
-                    </p>
-                  )}
-                </div>
-              )}
+          
+{model.transferLearning && (
+  <div className="mt-4 border-t pt-4">
+    <Label htmlFor="sourceModel" className="mb-2 block">Source Model</Label>
+    {isLoading ? (
+      <div className="flex items-center justify-center py-2">
+        <Spinner />
+        <span className="ml-2">Loading models...</span>
+      </div>
+    ) : (
+      <>
+        <Select
+          value={selectedSourceModel}
+          onValueChange={(value) => {
+            setSelectedSourceModel(value);
+            setModel(prev => ({...prev, sourceModelId: value}));
+          }}
+          disabled={isLoading || availableModels.length === 0}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={
+              availableModels.length === 0 
+                ? "No compatible models available" 
+                : "Select a source model"
+            } />
+          </SelectTrigger>
+          {availableModels.length > 0 && (
+            <SelectContent>
+              {availableModels.map((sourceModel) => (
+                <SelectItem key={sourceModel.id} value={sourceModel.id}>
+                  {`${sourceModel.type} (trained on ${sourceModel.target}) - RMSE: ${sourceModel.metrics?.rmse?.toFixed(2) ?? 'N/A'}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          )}
+        </Select>
+        {availableModels.length === 0 && !isLoading && (
+          <div className="mt-2 p-3 bg-yellow-50 rounded-md">
+            <p className="text-sm text-yellow-700">
+              No compatible pre-trained {model.modelType} models available. 
+              Train a model first to use transfer learning.
+            </p>
+          </div>
+        )}
+      </>
+    )}
+  </div>
+)}
+              
             </div>
           </div>
         </div>

@@ -5,6 +5,7 @@ import tempfile
 import os
 import time
 import traceback
+from fastapi import Request
 from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -25,7 +26,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 from io import BytesIO
-
+import uuid
 app = FastAPI()
 
 # CORS configuration
@@ -45,6 +46,7 @@ current_dataset = None
 processed_data = None
 trained_models = {}
 
+
 def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -63,169 +65,48 @@ def clean_numeric_string(value: Any) -> float:
 def clean_numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(df[column].apply(clean_numeric_string), errors='coerce')
 
+from pydantic import BaseModel, Field
+from typing import List, Optional, Tuple
+
 class DataConfig(BaseModel):
     timeColumn: str
     targetVariable: str
     frequency: str
-    features: Optional[List[str]] = []
-    modelType: Optional[str] = 'ensemble'
-    hyperparameterTuning: Optional[bool] = False
-    ensembleLearning: Optional[bool] = False
-    transferLearning: Optional[bool] = False
-    ensembleModels: Optional[List[str]] = ['arima', 'lstm', 'xgboost']
-    ensembleMethod: Optional[str] = 'voting'
+    features: List[str] = Field(default_factory=list)
+
+    modelType: str = "ensemble"
+    hyperparameterTuning: bool = False
+    ensembleLearning: bool = False
+    transferLearning: bool = False
+
+    ensembleModels: List[str] = Field(default_factory=lambda: ["arima", "lstm", "xgboost"])
+    ensembleMethod: str = "voting"
     ensembleWeights: Optional[List[float]] = None
     sourceModelId: Optional[str] = None
-    order: Optional[tuple] = (1,1,1)
-    seasonal_order: Optional[tuple] = None
-    changepoint_prior_scale: Optional[float] = 0.05
-    seasonality_prior_scale: Optional[float] = 10.0
-    seasonality_mode: Optional[str] = 'additive'
-    units: Optional[int] = 50
-    dropout: Optional[float] = 0.2
-    epochs: Optional[int] = 100
-    batch_size: Optional[int] = 32
-    sequence_length: Optional[int] = 10
-    n_estimators: Optional[int] = 100
-    max_depth: Optional[int] = 10
-    learning_rate: Optional[float] = 0.1
-    gamma: Optional[float] = 0
-    min_child_weight: Optional[float] = 0
-    subsample: Optional[float] = 0.8
+
+    order: Tuple[int, int, int] = (1, 1, 1)
+    seasonal_order: Optional[Tuple[int, int, int, int]] = None
+    changepoint_prior_scale: float = 0.05
+    seasonality_prior_scale: float = 10.0
+    seasonality_mode: str = "additive"
+
+    units: int = 50
+    dropout: float = 0.2
+    epochs: int = 100
+    batch_size: int = 32
+    sequence_length: int = 10
+
+    n_estimators: int = 100
+    max_depth: int = 10
+    learning_rate: float = 0.1
+    gamma: float = 0
+    min_child_weight: float = 0
+    subsample: float = 0.8
+
 
 class ExportConfig(BaseModel):
     format: str
     data: Dict[str, Any]
-
-@app.get("/api/models")
-async def get_available_models():
-    models = []
-    for model_id, model_info in trained_models.items():
-        models.append({
-            'id': model_id,
-            'type': model_info['config'].get('modelType', 'unknown').upper(),
-            'target': model_info['target'],
-            'parameters': model_info['params'],
-            'metrics': model_info.get('metrics', {})
-        })
-    return models
-
-@app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
-    if not allowed_file(file.filename):
-        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
-    
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-    with open(filepath, 'wb') as f:
-        content = await file.read()
-        f.write(content)
-    
-    global current_dataset
-    current_dataset = pd.read_csv(filepath)
-    if current_dataset is None or current_dataset.empty:
-        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
-    
-    return {
-        "message": "File uploaded successfully",
-        "tables": [file.filename.replace('.csv', '')],
-        "stats": {
-            "rows": len(current_dataset),
-            "columns": list(current_dataset.columns)
-        }
-    }
-
-@app.get("/api/columns")
-async def get_columns():
-    if current_dataset is None:
-        raise HTTPException(status_code=404, detail="No dataset loaded")
-    return {"columns": list(current_dataset.columns)}
-
-@app.post("/api/process")
-async def process_data(config: DataConfig):
-    if current_dataset is None:
-        raise HTTPException(status_code=404, detail="No dataset loaded")
-    
-    df = current_dataset.copy()
-    try:
-        df[config.timeColumn] = pd.to_datetime(df[config.timeColumn])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error converting time column: {str(e)}")
-    
-    if config.targetVariable not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Target variable '{config.targetVariable}' not found")
-    
-    df[config.targetVariable] = clean_numeric_column(df, config.targetVariable)
-    
-    for feature in config.features:
-        if feature in df.columns:
-            df[feature] = clean_numeric_column(df, feature)
-    
-    # Causal Feature Engineering: Lagged values and shifted rolling statistics
-    for lag in [1, 2, 3]:
-        df[f'{config.targetVariable}_lag{lag}'] = df[config.targetVariable].shift(lag)
-    df[f'{config.targetVariable}_rolling_mean'] = df[config.targetVariable].rolling(window=3).mean().shift(1)
-    df[f'{config.targetVariable}_rolling_std'] = df[config.targetVariable].rolling(window=3).std().shift(1)
-    
-    df = df.groupby(config.timeColumn).agg({
-        config.targetVariable: 'mean',
-        **{feature: 'mean' for feature in config.features if feature in df.columns},
-        **{f'{config.targetVariable}_lag{lag}': 'mean' for lag in [1, 2, 3]},
-        f'{config.targetVariable}_rolling_mean': 'mean',
-        f'{config.targetVariable}_rolling_std': 'mean'
-    }).reset_index()
-    
-    df.set_index(config.timeColumn, inplace=True)
-    df.sort_index(inplace=True)
-    
-    df = df.ffill().bfill()
-    
-    if config.frequency == 'daily':
-        df = df.resample('D').mean().ffill().bfill()
-    elif config.frequency == 'weekly':
-        df = df.resample('W-MON').mean().ffill().bfill()
-    elif config.frequency == 'monthly':
-        df = df.resample('MS').mean().ffill().bfill()
-    else:
-        raise HTTPException(status_code=400, detail=f"Unsupported frequency: {config.frequency}")
-    
-    global processed_data
-    processed_data = {
-        'data': df,
-        'config': {
-            'time_column': config.timeColumn,
-            'target': config.targetVariable,
-            'frequency': config.frequency
-        },
-        'features': config.features + [f'{config.targetVariable}_lag{lag}' for lag in [1, 2, 3]] + 
-                    [f'{config.targetVariable}_rolling_mean', f'{config.targetVariable}_rolling_std']
-    }
-    
-    return {
-        "message": "Data processed successfully",
-        "preview": {
-            "rows": len(df),
-            "start_date": df.index.min().strftime('%Y-%m-%d'),
-            "end_date": df.index.max().strftime('%Y-%m-%d'),
-            "columns": df.columns.tolist(),
-            "sample": df.head(5).to_dict(orient='records')
-        }
-    }
-
-def prepare_sequence_data(data, target_col, sequence_length):
-    sequences = []
-    targets = []
-    number_of_features = data.shape[1]
-    for i in range(len(data) - sequence_length):
-        sequence = data.iloc[i:i + sequence_length].values
-        if target_col in data.columns:
-            target = data[target_col].iloc[i + sequence_length]
-        else:
-            raise KeyError(f"Target column '{target_col}' not found in data with columns: {data.columns.tolist()}")
-
-        sequences.append(sequence)
-        targets.append(target)
-    return np.array(sequences), np.array(targets)
-
 class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
     def __init__(self, models, weights=None, method='voting'):
         self.models = models
@@ -368,7 +249,210 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
         else:
             return np.mean(predictions, axis=0)
 
+def load_pretrained_models():
+    """Improved model loading with better metadata handling"""
+    if not os.path.exists("models"):
+        return
         
+    for filename in os.listdir("models"):
+        try:
+            model_id = os.path.splitext(filename)[0]
+            filepath = os.path.join("models", filename)
+            
+            if filename.endswith(".pkl"):
+                model_data = joblib.load(filepath)
+                if isinstance(model_data, dict):
+                    trained_models[model_id] = model_data
+                else:
+                    # Handle case where only model object was saved
+                    trained_models[model_id] = {
+                        'model': model_data,
+                        'params': {},
+                        'config': {},
+                        'target': 'unknown',
+                        'metrics': {}
+                    }
+                    
+            elif filename.endswith((".h5", ".keras")):
+                model = tf.keras.models.load_model(filepath)
+                # Try to load associated metadata
+                metadata_path = os.path.join("models", f"{model_id}_meta.pkl")
+                if os.path.exists(metadata_path):
+                    metadata = joblib.load(metadata_path)
+                else:
+                    metadata = {
+                        'params': {},
+                        'config': {},
+                        'target': 'unknown',
+                        'metrics': {}
+                    }
+                
+                trained_models[model_id] = {
+                    'model': model,
+                    **metadata
+                }
+                
+        except Exception as e:
+            print(f"Error loading model {filename}: {str(e)}")
+            continue
+load_pretrained_models() 
+@app.get("/api/models")
+async def get_available_models(request: Request):
+    try:
+        user_id = request.headers.get("X-User-Id", "anonymous")
+        
+        if not trained_models:
+            load_pretrained_models()  # Attempt to reload if empty
+            
+        models = []
+        for model_id, model_info in trained_models.items():
+            try:
+                # Skip models that don't belong to the current user
+                if model_info.get('user_id') != user_id:
+                    continue
+                    
+                # Validate model info structure
+                if not isinstance(model_info, dict):
+                    continue
+                    
+                if 'model' not in model_info:
+                    continue
+                    
+                models.append({
+                    'id': model_id,
+                    'type': model_info.get('config', {}).get('modelType', 'unknown').lower(),
+                    'target': model_info.get('target', 'unknown'),
+                    'metrics': model_info.get('metrics', {})
+                })
+            except Exception as e:
+                print(f"Error processing model {model_id}: {str(e)}")
+                continue
+                
+        return models
+        
+    except Exception as e:
+        print(f"Error in /api/models: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load available models"
+        )
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    if not allowed_file(file.filename):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+    
+    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+    with open(filepath, 'wb') as f:
+        content = await file.read()
+        f.write(content)
+    
+    global current_dataset
+    current_dataset = pd.read_csv(filepath)
+    if current_dataset is None or current_dataset.empty:
+        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
+    
+    return {
+        "message": "File uploaded successfully",
+        "tables": [file.filename.replace('.csv', '')],
+        "stats": {
+            "rows": len(current_dataset),
+            "columns": list(current_dataset.columns)
+        }
+    }
+
+@app.get("/api/columns")
+async def get_columns():
+    if current_dataset is None:
+        raise HTTPException(status_code=404, detail="No dataset loaded")
+    return {"columns": list(current_dataset.columns)}
+
+@app.post("/api/process")
+async def process_data(config: DataConfig):
+    if current_dataset is None:
+        raise HTTPException(status_code=404, detail="No dataset loaded")
+    
+    df = current_dataset.copy()
+    try:
+        df[config.timeColumn] = pd.to_datetime(df[config.timeColumn])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error converting time column: {str(e)}")
+    
+    if config.targetVariable not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Target variable '{config.targetVariable}' not found")
+    
+    df[config.targetVariable] = clean_numeric_column(df, config.targetVariable)
+    
+    for feature in config.features:
+        if feature in df.columns:
+            df[feature] = clean_numeric_column(df, feature)
+    
+    # Causal Feature Engineering: Lagged values and shifted rolling statistics
+    for lag in [1, 2, 3]:
+        df[f'{config.targetVariable}_lag{lag}'] = df[config.targetVariable].shift(lag)
+    df[f'{config.targetVariable}_rolling_mean'] = df[config.targetVariable].rolling(window=3).mean().shift(1)
+    df[f'{config.targetVariable}_rolling_std'] = df[config.targetVariable].rolling(window=3).std().shift(1)
+    
+    df = df.groupby(config.timeColumn).agg({
+        config.targetVariable: 'mean',
+        **{feature: 'mean' for feature in config.features if feature in df.columns},
+        **{f'{config.targetVariable}_lag{lag}': 'mean' for lag in [1, 2, 3]},
+        f'{config.targetVariable}_rolling_mean': 'mean',
+        f'{config.targetVariable}_rolling_std': 'mean'
+    }).reset_index()
+    
+    df.set_index(config.timeColumn, inplace=True)
+    df.sort_index(inplace=True)
+    
+    df = df.ffill().bfill()
+    
+    if config.frequency == 'daily':
+        df = df.resample('D').mean().ffill().bfill()
+    elif config.frequency == 'weekly':
+        df = df.resample('W-MON').mean().ffill().bfill()
+    elif config.frequency == 'monthly':
+        df = df.resample('MS').mean().ffill().bfill()
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported frequency: {config.frequency}")
+    
+    global processed_data
+    processed_data = {
+        'data': df,
+        'config': {
+            'time_column': config.timeColumn,
+            'target': config.targetVariable,
+            'frequency': config.frequency
+        },
+        'features': config.features + [f'{config.targetVariable}_lag{lag}' for lag in [1, 2, 3]] + 
+                    [f'{config.targetVariable}_rolling_mean', f'{config.targetVariable}_rolling_std']
+    }
+    
+    return {
+        "message": "Data processed successfully",
+        "preview": {
+            "rows": len(df),
+            "start_date": df.index.min().strftime('%Y-%m-%d'),
+            "end_date": df.index.max().strftime('%Y-%m-%d'),
+            "columns": df.columns.tolist(),
+            "sample": df.head(5).to_dict(orient='records')
+        }
+    }
+
+def prepare_sequence_data(data, target_col, sequence_length):
+    sequences = []
+    targets = []
+    number_of_features = data.shape[1]
+    for i in range(len(data) - sequence_length):
+        sequence = data.iloc[i:i + sequence_length].values
+        if target_col in data.columns:
+            target = data[target_col].iloc[i + sequence_length]
+        else:
+            raise KeyError(f"Target column '{target_col}' not found in data with columns: {data.columns.tolist()}")
+
+        sequences.append(sequence)
+        targets.append(target)
+    return np.array(sequences), np.array(targets)
+
+   
 def evaluate_model(model, train, test, model_type):
     try:
         actuals = test[processed_data['config']['target']].values
@@ -652,84 +736,58 @@ def tune_hyperparameters(model_type, train, test, config):
     return best_params, best_model
 
 def apply_transfer_learning(source_model, train_data, config):
+    print(f"[TL] source_model: {type(source_model)}")
+    print(f"[TL] config: {config}")
+
     try:
-        target = processed_data['config']['target']
-        
-        if isinstance(source_model, Model):
-            input_shape = source_model.input_shape[1:]
-            source_config = {layer.name: layer.get_config() for layer in source_model.layers}
-            source_weights = {layer.name: layer.get_weights() for layer in source_model.layers}
-            
-            inputs = Input(shape=input_shape)
-            x = inputs
-            
-            for i, layer in enumerate(source_model.layers[1:-1]):
-                if isinstance(layer, (LSTM, Bidirectional)):
-                    config = source_config[layer.name]
-                    if isinstance(layer, Bidirectional):
-                        wrapped = config['layer']['config']
-                        wrapped['units'] = config.get('units', 50)
-                        x = Bidirectional(LSTM(**wrapped))(x)
-                    else:
-                        config['units'] = config.get('units', 50)
-                        x = LSTM(**config)(x)
-                elif isinstance(layer, BatchNormalization):
-                    x = BatchNormalization()(x)
-                elif isinstance(layer, Dropout):
-                    x = Dropout(config.get('dropout', 0.2))(x)
-                
-                if layer.name in source_weights:
-                    x.layer.set_weights(source_weights[layer.name])
-                    x.layer.trainable = False
-            
-            x = Dense(32, activation='relu')(x)
-            x = BatchNormalization()(x)
-            x = Dropout(0.2)(x)
-            outputs = Dense(1)(x)
-            
-            new_model = Model(inputs=inputs, outputs=outputs)
-            
-            new_model.compile(
-                optimizer=Adam(learning_rate=0.0001),
-                loss='mse',
-                metrics=['mae', 'mse']
+        if isinstance(source_model, Model):  # better: hasattr(source_model, "predict") and "layers" in dir(...)
+            print("[TL] Entering Keras TL branch")
+            # Copy architecture using submodel
+            truncated_model = Model(
+                inputs=source_model.input,
+                outputs=source_model.layers[-3].output  # or a layer name
             )
-            
+            truncated_model.trainable = False
+
+            x = truncated_model.output
+            x = Dense(32, activation='relu')(x)
+            x = Dropout(0.2)(x)
+            output = Dense(1)(x)
+
+            new_model = Model(inputs=truncated_model.input, outputs=output)
+            new_model.compile(optimizer=Adam(1e-4), loss='mse', metrics=['mae'])
+
             if hasattr(source_model, 'scaler'):
                 new_model.scaler = source_model.scaler
             if hasattr(source_model, 'sequence_length'):
                 new_model.sequence_length = source_model.sequence_length
-                
+
             return new_model
-            
-        elif isinstance(source_model, RandomForestRegressor):
-            n_estimators = min(config.get('n_estimators', 50), source_model.n_estimators)
-            new_model = RandomForestRegressor(
-                n_estimators=n_estimators,
-                max_depth=source_model.max_depth,
-                random_state=42,
-                warm_start=True
-            )
-            
-            if hasattr(source_model, 'estimators_'):
-                new_model.estimators_ = source_model.estimators_[:n_estimators]
-            
+
+        # For tree-based models (Random Forest, XGBoost)
+        elif isinstance(source_model, (RandomForestRegressor, XGBRegressor)):
+            if isinstance(source_model, RandomForestRegressor):
+                new_model = RandomForestRegressor(
+                    n_estimators=config.get('n_estimators', 50),
+                    max_depth=source_model.max_depth,
+                    warm_start=True,
+                    random_state=42
+                )
+                if hasattr(source_model, 'estimators_'):
+                    new_model.estimators_ = source_model.estimators_[:config.get('n_estimators', 50)]
+
+            elif isinstance(source_model, XGBRegressor):
+                new_model = XGBRegressor(
+                    n_estimators=config.get('n_estimators', 50),
+                    max_depth=source_model.max_depth,
+                    learning_rate=0.01,
+                    objective='reg:squarederror'
+                )
+                if hasattr(source_model, 'get_booster'):
+                    new_model._Booster = source_model.get_booster()
+
             return new_model
-            
-        elif isinstance(source_model, XGBRegressor):
-            new_model = XGBRegressor(
-                n_estimators=config.get('n_estimators', 50),
-                max_depth=source_model.max_depth,
-                learning_rate=config.get('learning_rate', 0.01),
-                objective='reg:squarederror',
-                random_state=42
-            )
-            
-            if hasattr(source_model, 'get_booster'):
-                new_model._Booster = source_model.get_booster().copy()
-            
-            return new_model
-            
+
     except Exception as e:
         print(f"Error in transfer learning: {str(e)}")
         traceback.print_exc()
@@ -799,28 +857,32 @@ def create_ensemble_model(train, test, config):
     return ensemble
 
 @app.post("/api/train")
-async def train_model(config: DataConfig):
+async def train_model(config: DataConfig, request: Request):
+    user_id = request.headers.get("X-User-Id", "anonymous")
+
     if processed_data is None:
         raise HTTPException(status_code=404, detail="No processed data available. Please process data first.")
-    
+
     df = processed_data['data']
     target = processed_data['config']['target']
-    
+
     split_point = int(len(df) * 0.8)
     train = df.iloc[:split_point]
     test = df.iloc[split_point:]
-    
+
     try:
+        model = None
+        params = {}
+
         if config.ensembleLearning:
             selected_models = config.ensembleModels
-            print(selected_models)
+            print("[Ensemble] Selected models:", selected_models)
             if config.modelType not in selected_models:
-                print("Hello")
                 selected_models.append(config.modelType)
-            
+
             ensemble = create_ensemble_model(
-                train, 
-                test, 
+                train,
+                test,
                 {
                     'ensembleModels': selected_models,
                     'ensembleMethod': config.ensembleMethod,
@@ -828,7 +890,7 @@ async def train_model(config: DataConfig):
                     **config.model_dump()
                 }
             )
-            
+
             X_train = train.drop(columns=[target])
             y_train = train[target]
             ensemble.fit(X_train, y_train)
@@ -837,128 +899,109 @@ async def train_model(config: DataConfig):
                 'ensemble_models': selected_models,
                 'method': config.ensembleMethod
             }
-        else:
-            if config.hyperparameterTuning:
-                params, model = tune_hyperparameters(config.modelType, train, test, config.model_dump())
-            else:
-                if config.modelType == 'arima':
-                    params, model = train_arima(train, test, config.model_dump())
-                elif config.modelType == 'prophet':
-                    params, model = train_prophet(train, test, config.model_dump())
-                elif config.modelType == 'lstm':
-                    params, model = train_lstm(train, config.model_dump())
-                elif config.modelType == 'random_forest':
-                    params, model = train_random_forest(train, test, config.model_dump())
-                elif config.modelType == 'xgboost':
-                    params, model = train_xgboost(train, test, config.model_dump())
-                else:
-                    raise HTTPException(status_code=400, detail=f"Unknown model type: {config.modelType}")
 
+        transferred_model = None  # ensure it's defined
+        print(config.transferLearning ,config.sourceModelId)
         if config.transferLearning and config.sourceModelId:
             source_model_id = config.sourceModelId
-            if source_model_id in trained_models:
-                source_model = trained_models[source_model_id]['model']
-                source_config = trained_models[source_model_id]['config']
-                source_target = trained_models[source_model_id]['target']
+            print("=== DEBUG TL BLOCK ===")
+            print(f"transferLearning: {config.transferLearning}")
+            print(f"sourceModelId: {config.sourceModelId}")
+            print(f"trained_models keys: {list(trained_models.keys())}")
+            print(f"Trying transfer from source_model_id: {source_model_id}")
+
+            if source_model_id not in trained_models:
+                print(f"[TL] Source model {source_model_id} not found")
+                raise HTTPException(status_code=404, detail="Source model not found")
+
+            source_model_info = trained_models[source_model_id]
+            source_type = source_model_info.get('config', {}).get('modelType', '').lower()
+            target_type = config.modelType.lower()
+
+            if source_type != target_type:
+                print(f"[TL] Type mismatch: Source({source_type}) vs Target({target_type})")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Source model type must match target model type"
+                )
+
+            if source_type not in ['lstm', 'random_forest', 'xgboost']:
+                print(f"[TL] Unsupported source model type: {source_type}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transfer learning not supported for this model type"
+                )
+
+            source_model = source_model_info['model']
+            transferred_model = apply_transfer_learning(source_model, train, config.model_dump())
+
+            if transferred_model is not None:
+                print("[TL] Transfer learning succeeded")
                 
-                transferred_model = apply_transfer_learning(source_model, train, config.model_dump())
-                
-                if transferred_model is not None:
-                    if isinstance(transferred_model, Model):
-                        sequence_length = getattr(source_model, 'sequence_length', 10)
-                        scaler = getattr(source_model, 'scaler', MinMaxScaler())
-                        transferred_model.sequence_length = sequence_length
-                        transferred_model.scaler = scaler
-                        
-                        scaled_data = scaler.transform(train)
-                        scaled_df = pd.DataFrame(scaled_data, index=train.index, columns=train.columns)
-                        
-                        X, y = prepare_sequence_data(
-                            scaled_df,
-                            target,
-                            sequence_length
-                        )
-                        
-                        for layer in transferred_model.layers[:-2]:
-                            layer.trainable = False
-                        
-                        transferred_model.fit(
-                            X, y,
-                            epochs=25,
-                            batch_size=32,
-                            validation_split=0.2,
-                            callbacks=[
-                                EarlyStopping(patience=5, restore_best_weights=True),
-                                ReduceLROnPlateau(factor=0.5, patience=3)
-                            ],
-                            verbose=0
-                        )
-                        
-                        for layer in transferred_model.layers:
-                            layer.trainable = True
-                        
-                        transferred_model.compile(
-                            optimizer=Adam(learning_rate=0.00001),
-                            loss='mse'
-                        )
-                        
-                        transferred_model.fit(
-                            X, y,
-                            epochs=25,
-                            batch_size=32,
-                            validation_split=0.2,
-                            callbacks=[
-                                EarlyStopping(patience=5, restore_best_weights=True),
-                                ReduceLROnPlateau(factor=0.5, patience=3)
-                            ],
-                            verbose=0
-                        )
-                    
-                    else:
-                        X_train = train.drop(columns=[target])
-                        y_train = train[target]
-                        
-                        if isinstance(transferred_model, RandomForestRegressor):
-                            transferred_model.warm_start = True
-                            transferred_model.fit(X_train, y_train)
-                        elif isinstance(transferred_model, XGBRegressor):
-                            transferred_model.fit(
-                                X_train, y_train,
-                                xgb_model=transferred_model.get_booster(),
-                                learning_rate=0.01
-                            )
-                    
-                    model = transferred_model
-                    params = {
-                        'transfer_learning': True,
-                        'source_model': source_model_id,
-                        'source_config': source_config,
-                        'source_target': source_target,
-                        **config.model_dump()
-                    }
-                    
-                    if isinstance(model, Model):
-                        model.scaler = scaler
-                        model.sequence_length = sequence_length
-                else:
-                    print("Transfer learning failed, falling back to regular training")
-                    if config.modelType == 'lstm':
-                        params, model = train_lstm(train, config.model_dump())
-                    elif config.modelType == 'random_forest':
-                        params, model = train_random_forest(train, test, config.model_dump())
-                    elif config.modelType == 'xgboost':
-                        params, model = train_xgboost(train, test, config.model_dump())
-            
+                if isinstance(transferred_model, Model):  # Keras model
+                    scaler = MinMaxScaler()
+                    scaled_data = scaler.fit_transform(train)
+                    scaled_df = pd.DataFrame(scaled_data, index=train.index, columns=train.columns)
+
+                    sequence_length = getattr(transferred_model, 'sequence_length', 10)
+                    X, y = prepare_sequence_data(scaled_df, target, sequence_length)
+
+                    callbacks = [
+                        EarlyStopping(patience=10, restore_best_weights=True),
+                        ReduceLROnPlateau(factor=0.5, patience=5)
+                    ]
+
+                    transferred_model.fit(
+                        X, y,
+                        epochs=config.epochs,
+                        batch_size=config.batch_size,
+                        validation_split=0.2,
+                        callbacks=callbacks,
+                        verbose=0
+                    )
+
+                    transferred_model.scaler = scaler
+                    transferred_model.sequence_length = sequence_length
+
+                else:  # Tree-based model: standard fitting
+                    X_train = train.drop(columns=[target])
+                    y_train = train[target]
+                    transferred_model.fit(X_train, y_train)
+
+                model = transferred_model
+                params = {"source_model_id": source_model_id, "transferred": True}
+
+            else:
+                print("[TL] Transfer learning failed - falling back to regular training")
+
+        # If no model from transfer learning or ensemble, do regular training
+        if model is None:
+            if config.modelType == 'arima':
+                params, model = train_arima(train, test, config.model_dump())
+            elif config.modelType == 'prophet':
+                params, model = train_prophet(train, test, config.model_dump())
+            elif config.modelType == 'lstm':
+                params, model = train_lstm(train, config.model_dump())
+            elif config.modelType == 'random_forest':
+                params, model = train_random_forest(train, test, config.model_dump())
+            elif config.modelType == 'xgboost':
+                params, model = train_xgboost(train, test, config.model_dump())
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown model type: {config.modelType}")
+
+
+
+        # ✅ Prediction
         if config.ensembleLearning:
             X_test = test.copy()
             if hasattr(model, 'feature_names_'):
                 for feature in model.feature_names_:
                     if feature not in X_test.columns:
-                        X_test[feature] = 0  # default fill
-                X_test = X_test[model.feature_names_]  # correct order
-
-       
-
+                        X_test[feature] = 0
+                X_test = X_test[model.feature_names_]
+            else:
+                X_test = test.drop(columns=[target])
+            predictions = model.predict(X_test)
         else:
             if config.modelType == 'arima':
                 predictions = model.get_forecast(len(test)).predicted_mean
@@ -969,25 +1012,17 @@ async def train_model(config: DataConfig):
             elif config.modelType == 'lstm':
                 scaler = getattr(model, 'scaler', None)
                 sequence_length = getattr(model, 'sequence_length', 10)
-                
                 if scaler is None:
                     scaler = MinMaxScaler()
                     concat_data = pd.concat([train, test])
                     scaler.fit(concat_data)
                     model.scaler = scaler
-                
+
                 scaled_test = scaler.transform(test)
                 test_df = pd.DataFrame(scaled_test, index=test.index, columns=test.columns)
-                
-                X_test, _ = prepare_sequence_data(
-                    test_df,
-                    target,
-                    sequence_length
-                )
-                
-                predictions = model.predict(X_test, verbose=0)
-                predictions = predictions.flatten()
-                
+                X_test, _ = prepare_sequence_data(test_df, target, sequence_length)
+
+                predictions = model.predict(X_test, verbose=0).flatten()
                 dummy = np.zeros((len(predictions), test.shape[1]))
                 target_idx = test.columns.get_loc(target)
                 dummy[:, target_idx] = predictions
@@ -996,10 +1031,13 @@ async def train_model(config: DataConfig):
             else:
                 X_test = test.drop(columns=[target])
                 predictions = model.predict(X_test.to_numpy())
-        
+
         actuals = test[target].values
         metrics = evaluate_model(model, train, test, config.modelType if not config.ensembleLearning else 'ensemble')
-        
+
+        if not os.path.exists('models'):
+            os.makedirs('models')
+
         model_id = f"{config.modelType}_{int(time.time())}"
         trained_models[model_id] = {
             'model': model,
@@ -1008,10 +1046,37 @@ async def train_model(config: DataConfig):
             'train_data': train,
             'test_data': test,
             'target': target,
-            'metrics': metrics
+            'metrics': metrics,
+            'user_id': user_id
         }
-        
-        return {
+
+        if isinstance(model, Model):
+            model.save(f"models/{model_id}.keras")
+            joblib.dump({
+                'params': params,
+                'config': config.model_dump(),
+                'target': target,
+                'metrics': metrics,
+                'user_id': user_id
+            }, f"models/{model_id}_meta.pkl")
+            print(f"Keras model saved at models/{model_id}.keras")
+        else:
+            joblib.dump({
+                'model': model,
+                'params': params,
+                'config': config.model_dump(),
+                'target': target,
+                'metrics': metrics,
+                'user_id': user_id
+            }, f"models/{model_id}.pkl")
+            print(f"Non-Keras model saved at models/{model_id}.pkl")
+
+        min_len = min(len(actuals), len(predictions))
+        actuals = actuals[:min_len]
+        predictions = predictions[:min_len]
+
+        # ✅ FIXED: return block must be closed properly
+        response = {
             'status': 'success',
             'model_id': model_id,
             'parameters': params,
@@ -1033,7 +1098,10 @@ async def train_model(config: DataConfig):
                 }
             }
         }
-        
+
+        load_pretrained_models()  # refresh available models
+        return response
+
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail={
@@ -1041,6 +1109,7 @@ async def train_model(config: DataConfig):
             'details': traceback.format_exc()
         })
 
+    
 @app.post("/api/export")
 async def export_results(config: ExportConfig):
     try:
@@ -1091,6 +1160,10 @@ async def export_results(config: ExportConfig):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
+# Move this here
+
+
 if __name__ == '__main__':
+
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)
