@@ -71,32 +71,64 @@ const ResultsStep = () => {
   }, [results?.dates, results?.actual, results?.forecasts]);
 
   const handleExport = async (format: 'csv' | 'excel' | 'json') => {
-    if (isLoading || !results) return;
-    
-    setIsLoading(true);
-    try {
-      const exportData = {
-        Results: {
-          modelInfo: results.modelInfo,
-          metrics: results.metrics,
-          data: results.dates.map((date, i) => ({
-            date,
-            actual: results.actual[i],
-            forecast: results.forecasts[i],
-            error: results.actual[i] - results.forecasts[i]
-          }))
-        }
-      };
-      
-      await api.exportResults(format, exportData);
-      toast.success(`Results exported successfully as ${format.toUpperCase()}`);
-    } catch (error) {
-      console.error("Export error:", error);
-      toast.error(`Failed to export results as ${format.toUpperCase()}`);
-    } finally {
-      setIsLoading(false);
+  if (isLoading || !results) return;
+
+  setIsLoading(true);
+  try {
+    const exportData = {
+      Results: {
+        modelInfo: results.modelInfo,
+        metrics: results.metrics,
+        data: results.dates.map((date, i) => ({
+          date,
+          actual: results.actual[i],
+          forecast: results.forecasts[i],
+          error: results.actual[i] - results.forecasts[i]
+        }))
+      }
+    };
+
+    const response = await fetch("http://localhost:5000/api/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        format,
+        data: exportData
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Failed to export as ${format.toUpperCase()}`);
+
+    if (format === 'json') {
+      const json = await response.json();
+      const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "forecast_results.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `forecast_results.${format === "excel" ? "xlsx" : "csv"}`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
-  };
+
+    toast.success(`Results exported successfully as ${format.toUpperCase()}`);
+  } catch (error) {
+    console.error("Export error:", error);
+    toast.error(`Failed to export results as ${format.toUpperCase()}`);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const handleRestart = () => setCurrentStep("database");
   const handleBack = () => setCurrentStep("train");

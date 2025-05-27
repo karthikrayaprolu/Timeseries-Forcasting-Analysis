@@ -9,6 +9,7 @@ from fastapi import Request
 from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
+
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from statsmodels.tsa.statespace.sarimax import SARIMAX, SARIMAXResultsWrapper
@@ -28,6 +29,7 @@ import tensorflow as tf
 from io import BytesIO
 import uuid
 app = FastAPI()
+
 
 # CORS configuration
 app.add_middleware(
@@ -105,8 +107,8 @@ class DataConfig(BaseModel):
 
 
 class ExportConfig(BaseModel):
-    format: str
     data: Dict[str, Any]
+    format: str
 class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
     def __init__(self, models, weights=None, method='voting'):
         self.models = models
@@ -1118,11 +1120,14 @@ async def export_results(config: ExportConfig):
             raise HTTPException(status_code=400, detail="No data provided")
 
         model_info = results_data.get('modelInfo', {})
+       
         metrics_data = results_data.get('metrics', {})
+        
         data_records = results_data.get('data', [])
-        
+     
+
         df = pd.DataFrame(data_records)
-        
+
         metadata = {
             'Model Type': model_info.get('type', 'Unknown'),
             'Features Used': ', '.join(model_info.get('parameters', {}).get('features', [])),
@@ -1131,30 +1136,44 @@ async def export_results(config: ExportConfig):
             'MAE': metrics_data.get('mae', 'N/A'),
             'MAPE': metrics_data.get('mape', 'N/A')
         }
-        
-        if config.format in ['csv', 'excel']:
+       
+        if config.format == 'excel':
+           
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, sheet_name='Forecast Results', index=False, startrow=len(metadata) + 2)
-                worksheet = writer.sheets['ForecastResults']
+                worksheet = writer.sheets['Forecast Results']
                 for i, (key, value) in enumerate(metadata.items()):
                     worksheet.write(i, 0, key)
                     worksheet.write(i, 1, str(value))
-            
+            print("Excel export successful")
             output.seek(0)
             return Response(
                 content=output.getvalue(),
                 media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 headers={'Content-Disposition': 'attachment;filename=forecast_results.xlsx'}
             )
-            
-        else:  # json
+        
+        elif config.format == 'json':
+
             output = {
                 'metadata': metadata,
                 'data': df.to_dict(orient='records')
             }
+            print("JSON export successful")
             return JSONResponse(content=output)
-        
+        elif config.format == 'csv':
+            output = df.to_csv(index=False)
+            print("CSV export successful")
+            return Response(
+                content=output,
+                media_type='text/csv',
+                headers={'Content-Disposition': 'attachment;filename=forecast_results.csv'}
+            
+        )
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported export format")
+
     except Exception as e:
         print(f"Export error: {str(e)}")
         traceback.print_exc()
