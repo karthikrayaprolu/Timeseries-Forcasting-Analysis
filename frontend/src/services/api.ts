@@ -13,10 +13,22 @@ import {
 
 const BASE_URL = 'http://localhost:5000/api';
 
-// Utility to fetch user ID from localStorage
-const getUserId = () => localStorage.getItem("user_id") || "";
+// Import Firebase Auth
+import { getAuth } from "firebase/auth";
 
-// Create axios client with dynamic user headers
+// Utility to fetch user ID from Firebase
+const getAuthHeaders = async () => {
+  const auth = getAuth();
+  const user = auth.currentUser;
+  if (!user) return {};
+  const token = await user.getIdToken();
+  return {
+    "Authorization": `Bearer ${token}`,
+    "X-User-Id": user.uid, // ✅ critical for user-specific models
+  };
+};
+
+// Create axios client
 const apiClient = axios.create({
   baseURL: BASE_URL,
   headers: {
@@ -24,16 +36,7 @@ const apiClient = axios.create({
   }
 });
 
-// Interceptor to inject user ID
-apiClient.interceptors.request.use((config) => {
-  const userId = getUserId();
-  if (userId && config.headers) {
-    config.headers['X-User-Id'] = userId;
-  }
-  return config;
-});
-
-// Centralized error handler
+// Error handler
 const handleApiError = (error: any, fallbackMessage: string) => {
   if (error.response) {
     throw new Error(error.response.data.error || fallbackMessage);
@@ -41,12 +44,13 @@ const handleApiError = (error: any, fallbackMessage: string) => {
   throw new Error('Network error - please check if the server is running');
 };
 
+// ✅ Single export block
 export const api = {
-  // Upload CSV file
+  // Upload CSV
   uploadCsvFile: async (formData: FormData) => {
     try {
       const response = await apiClient.post('/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }, // overrides JSON
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       return response.data;
     } catch (error) {
@@ -54,20 +58,7 @@ export const api = {
     }
   },
 
-  // Get available tables (for future DB support)
-  getTables: async (databaseType: string) => {
-    try {
-      if (databaseType === 'local') {
-        return ['uploaded_csv'];
-      }
-      const response = await apiClient.get(`/tables?type=${databaseType}`);
-      return response.data.tables;
-    } catch (error) {
-      handleApiError(error, 'Failed to get tables');
-    }
-  },
-
-  // Get columns for uploaded or selected dataset
+  // Get columns
   getColumns: async () => {
     try {
       const response = await apiClient.get('/columns');
@@ -77,7 +68,7 @@ export const api = {
     }
   },
 
-  // Process uploaded data
+  // Process data
   processData: async (config: ProcessConfig) => {
     try {
       const response = await apiClient.post('/process', config);
@@ -87,53 +78,45 @@ export const api = {
     }
   },
 
-  // Train model with user context
-
-trainModel: async (config: ModelConfig) => {
-  try {
-    console.log("🚀 Sending training config:", config);
-    const response = await apiClient.post('/train', config);
-
-    
-    // Handle transfer learning specific response
-    if (config.transferLearning && config.sourceModelId) {
-      toast.success("Transfer learning completed successfully!", {
-        description: `Model was initialized from ${config.sourceModelId} and fine-tuned on your data`
-      });
-    }
-    
-    return response.data;
-  } catch (error) {
-    if (config.transferLearning) {
-      toast.error("Transfer learning failed", {
-        description: error instanceof Error ? error.message : String(error)
-      });
-    } else {
-      toast.error("Model training failed", {
-        description: error instanceof Error ? error.message : String(error)
-      });
-    }
-    throw error;
-  }
-},
-  // Get pretrained models for transfer learning
+  // ✅ Get pretrained models (with user ID)
   getAvailableModels: async () => {
     try {
-      const response = await apiClient.get('/models');
+      const headers = await getAuthHeaders();
+      const response = await apiClient.get("/models", { headers });
       return response.data;
     } catch (error) {
       handleApiError(error, 'Failed to get available models');
     }
   },
 
-  // Get model training results
+  // ✅ Train model (with user ID)
+  trainModel: async (config: ModelConfig) => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await apiClient.post("/train", config, { headers });
+
+      if (config.transferLearning && config.sourceModelId) {
+        toast.success("Transfer learning completed successfully!", {
+          description: `Model initialized from ${config.sourceModelId} and fine-tuned`
+        });
+      }
+
+      return response.data;
+    } catch (error) {
+      toast.error("Model training failed", {
+        description: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  },
+
+  // Get results
   getResults: async (modelId: string): Promise<ResultsData> => {
     try {
       const response = await apiClient.get(`/results/${modelId}`);
       return response.data;
     } catch (error) {
       handleApiError(error, 'Failed to get results');
-      throw error;
     }
   }
 };

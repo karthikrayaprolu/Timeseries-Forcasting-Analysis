@@ -5,10 +5,11 @@ import tempfile
 import os
 import time
 import traceback
-from fastapi import Request
+from fastapi import Request, Depends
 from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
+
 
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -28,9 +29,14 @@ from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 from io import BytesIO
 import uuid
+from pymongo import MongoClient
+
+# Define your MongoDB URI here, e.g., "mongodb://localhost:27017/"
+
+
+# from auth import router as auth_router
+
 app = FastAPI()
-
-
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +53,7 @@ ALLOWED_EXTENSIONS = {'csv'}
 current_dataset = None
 processed_data = None
 trained_models = {}
+
 
 
 def allowed_file(filename: str) -> bool:
@@ -69,6 +76,11 @@ def clean_numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
 
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple
+
+class UserSignup(BaseModel):
+    name: str
+    email: str
+    password: str
 
 class DataConfig(BaseModel):
     timeColumn: str
@@ -298,6 +310,8 @@ def load_pretrained_models():
             print(f"Error loading model {filename}: {str(e)}")
             continue
 load_pretrained_models() 
+
+
 @app.get("/api/models")
 async def get_available_models(request: Request):
     try:
