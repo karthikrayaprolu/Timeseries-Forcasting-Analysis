@@ -4,16 +4,6 @@ import { api } from "@/services/api";
 import { gsap } from "gsap";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
 import { FileDown } from "lucide-react";
 import {
   Card,
@@ -22,10 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import Plotly from 'plotly.js-dist-min';
 
 const ResultsStep = () => {
   const { results, setCurrentStep, isLoading, setIsLoading } = useWorkflow();
   const componentRef = useRef<HTMLDivElement>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
 
   // GSAP animation
   useEffect(() => {
@@ -42,6 +34,138 @@ const ResultsStep = () => {
       );
     }
   }, []);
+
+  // Create Plotly chart
+  useEffect(() => {
+    if (plotRef.current && results?.dates?.length) {
+      const dates = results.dates || [];
+      const actualValues = results.actual || [];
+      const predictedValues = results.forecasts || [];
+
+      // Prepare data for Plotly
+      const actualTrace = {
+        x: dates,
+        y: actualValues,
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: 'Actual Values',
+        line: {
+          color: '#6366f1',
+          width: 3
+        },
+        marker: {
+          color: '#6366f1',
+          size: 6
+        }
+      };
+
+      const futureDates = results.futureForecast?.dates || [];
+const futureValues = results.futureForecast?.predictions || [];
+
+const predictedTrace = {
+  x: dates,
+  y: predictedValues,
+  type: 'scatter',
+  mode: 'lines+markers',
+  name: 'Predicted Values',
+  line: {
+    color: '#f59e0b',
+    width: 3,
+    dash: 'dash'
+  },
+  marker: {
+    color: '#f59e0b',
+    size: 6
+  }
+};
+
+const futureTrace = {
+  x: futureDates,
+  y: futureValues,
+  type: 'scatter',
+  mode: 'lines+markers',
+  name: 'Future Forecast',
+  line: {
+    color: '#10b981',
+    width: 3,
+    dash: 'dot'
+  },
+  marker: {
+    color: '#10b981',
+    size: 6
+  }
+};
+
+
+
+
+      const data = [actualTrace, predictedTrace];
+
+      const layout = {
+        title: {
+          text: 'Forecast Visualization: Actual vs Predicted',
+          font: {
+            size: 18,
+            color: '#374151'
+          }
+        },
+        xaxis: {
+          title: {
+            text: 'Date',
+            font: {
+              size: 14,
+              color: '#6b7280'
+            }
+          },
+          gridcolor: '#e5e7eb',
+          tickfont: {
+            color: '#6b7280'
+          }
+        },
+        yaxis: {
+          title: {
+            text: 'Value',
+            font: {
+              size: 14,
+              color: '#6b7280'
+            }
+          },
+          gridcolor: '#e5e7eb',
+          tickfont: {
+            color: '#6b7280'
+          }
+        },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        legend: {
+          x: 0,
+          y: 1,
+          bgcolor: 'rgba(255,255,255,0.8)',
+          bordercolor: '#e5e7eb',
+          borderwidth: 1,
+          font: {
+            color: '#374151'
+          }
+        },
+        hovermode: 'x unified',
+        margin: {
+          l: 60,
+          r: 30,
+          t: 60,
+          b: 60
+        }
+      };
+
+      const config = {
+        displayModeBar: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+        responsive: true
+      };
+
+      Plotly.newPlot(plotRef.current, data, layout, config);
+    }
+  }, [results]);
 
   if (!results) {
     return (
@@ -60,75 +184,74 @@ const ResultsStep = () => {
     );
   }
 
-  // Format data for the chart
-  const chartData = React.useMemo(() => {
-    if (!results?.dates?.length) return [];
-    return results.dates.map((date, index) => ({
-      date: (date || '').slice(0, 7) || '',
-      Actual: Number(results.actual?.[index] ?? 0),
-      Predicted: Number(results.forecasts?.[index] ?? 0),
-    }));
-  }, [results?.dates, results?.actual, results?.forecasts]);
-
   const handleExport = async (format: 'csv' | 'excel' | 'json') => {
-  if (isLoading || !results) return;
+    if (isLoading || !results) return;
 
-  setIsLoading(true);
-  try {
-    const exportData = {
-      Results: {
-        modelInfo: results.modelInfo,
-        metrics: results.metrics,
-        data: results.dates.map((date, i) => ({
-          date,
-          actual: results.actual[i],
-          forecast: results.forecasts[i],
-          error: results.actual[i] - results.forecasts[i]
-        }))
-      }
-    };
+    setIsLoading(true);
+    try {
+      const historicalData = results.dates.map((date, i) => ({
+  date,
+  actual: results.actual[i],
+  forecast: results.forecasts[i],
+  error: results.actual[i] - results.forecasts[i]
+}));
 
-    const response = await fetch("http://localhost:5000/api/export", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        format,
-        data: exportData
-      }),
-    });
+const futureData = (results.futureForecast?.dates || []).map((date, i) => ({
+  date,
+  actual: null,
+  forecast: results.futureForecast?.predictions?.[i],
+  error: null
+}));
 
-    if (!response.ok) throw new Error(`Failed to export as ${format.toUpperCase()}`);
-
-    if (format === 'json') {
-      const json = await response.json();
-      const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "forecast_results.json";
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `forecast_results.${format === "excel" ? "xlsx" : "csv"}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    toast.success(`Results exported successfully as ${format.toUpperCase()}`);
-  } catch (error) {
-    console.error("Export error:", error);
-    toast.error(`Failed to export results as ${format.toUpperCase()}`);
-  } finally {
-    setIsLoading(false);
+const exportData = {
+  Results: {
+    modelInfo: results.modelInfo,
+    metrics: results.metrics,
+    data: [...historicalData, ...futureData]
   }
 };
 
+
+      const response = await fetch("http://localhost:5000/api/export", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          format,
+          data: exportData
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Failed to export as ${format.toUpperCase()}`);
+
+      if (format === 'json') {
+        const json = await response.json();
+        const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "forecast_results.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `forecast_results.${format === "excel" ? "xlsx" : "csv"}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      toast.success(`Results exported successfully as ${format.toUpperCase()}`);
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error(`Failed to export results as ${format.toUpperCase()}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleRestart = () => setCurrentStep("database");
   const handleBack = () => setCurrentStep("train");
@@ -203,61 +326,22 @@ const ResultsStep = () => {
           ))}
         </div>
         
-        {/* Forecast Chart
+        {/* Plotly Forecast Chart */}
         <Card className="shadow-lg border-2 border-gray-200">
           <CardHeader className="space-y-2">
             <CardTitle className="text-xl font-semibold text-gray-800">Forecast Visualization</CardTitle>
             <CardDescription className="text-gray-500">
-              Historical data vs. predicted values
+              Interactive chart showing actual vs predicted values
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-[400px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#6b7280"
-                    tick={{ fill: '#6b7280' }}
-                  />
-                  <YAxis 
-                    stroke="#6b7280"
-                    tick={{ fill: '#6b7280' }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: 'white',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '0.5rem',
-                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                    }}
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="Actual"
-                    stroke="#6366f1"
-                    strokeWidth={2}
-                    dot={{ r: 3, fill: '#6366f1' }}
-                    activeDot={{ r: 5, fill: '#6366f1' }}
-                    name="Historical Data"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="Predicted"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={{ r: 3, fill: '#3b82f6' }}
-                    activeDot={{ r: 5, fill: '#3b82f6' }}
-                    name="Forecast"
-                    strokeDasharray="5 5"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            <div 
+              ref={plotRef} 
+              className="h-[500px] w-full"
+              style={{ minHeight: '500px' }}
+            />
           </CardContent>
-        </Card> */}
+        </Card>
 
         {/* Export Card */}
         <Card className="shadow-lg border-2 border-gray-200">

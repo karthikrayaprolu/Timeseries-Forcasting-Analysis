@@ -153,6 +153,14 @@ class DataConfig(BaseModel):
     frequency: str
     features: List[str] = Field(default_factory=list)
 
+    forecast_horizon: int =10
+    def __init__(self, **data):
+        super().__init__(**data)
+        if 'forecast_horizon' not in data:
+            print("[WARNING] forecast_horizon was not provided by the user.")
+        else:
+            print(f"[Success] User specified forecast_horizon: {data['forecast_horizon']}")
+
     modelType: str = "ensemble"
     hyperparameterTuning: bool = False
     ensembleLearning: bool = False
@@ -190,7 +198,6 @@ class DataConfig(BaseModel):
 
 class CorrelationRequest(BaseModel):
     targetVariable: str
-   
 
 class ExportConfig(BaseModel):
     data: Dict[str, Any]
@@ -270,10 +277,25 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
 
                 if isinstance(model, SARIMAXResultsWrapper):
                     steps = len(X)
-                    pred = model.get_forecast(steps=steps).predicted_mean.values
+                    n_periods = processed_data['config'].get('forecast_horizon', 30)
+                    pred = model.get_forecast(steps=n_periods).predicted_mean
+
 
                 elif isinstance(model, Prophet):
                     future_dates = pd.DataFrame({'ds': X.index})
+                    last_date = processed_data['data'].index[-1]
+                    n_periods = processed_data['config']['frequency'].forecast_horizon or 30
+                    freq_map = {
+                        'daily': 'D',
+                        'weekly': 'W-MON',
+                        'monthly': 'MS'
+                    }
+                    freq = freq_map.get(processed_data['config']['frequency'], 'D')
+
+                    future_dates = pd.date_range(start=last_date + pd.Timedelta(1, unit='d'), periods=n_periods, freq=freq)
+                    future_df = pd.DataFrame({'ds': future_dates})
+                    forecast = model.predict(future_df)
+
                     future_dates['ds'] = pd.to_datetime(future_dates['ds'], errors='coerce')
                     if future_dates['ds'].isnull().any():
                         raise ValueError("Invalid dates in Prophet future_dates")
@@ -286,17 +308,28 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                     if scaler is not None:
                         X_scaled = scaler.transform(X)
                         X_scaled_df = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
-                        sequences, _ = prepare_sequence_data(X_scaled_df, processed_data['config']['target'], sequence_length)
-                        if len(sequences) == 0:
+                        forecast = []
+                        current_sequence = X_scaled_df.iloc[-sequence_length:].values.reshape(1, sequence_length, -1)
+
+                        for _ in range(processed_data['config'].get('forecast_horizon', 30)):
+                            next_pred = model.predict(current_sequence, verbose=0)[0][0]
+                            forecast.append(next_pred)
+
+                            # Build new input sequence
+                            next_input = current_sequence[:, 1:, :].copy()  # Drop first time step
+                            next_input = np.append(next_input, [[[next_pred] * X_scaled_df.shape[1]]], axis=1)  # Repeat pred across features
+                            current_sequence = next_input
+
+                        if current_sequence is None or current_sequence.shape[1] == 0:
                             raise ValueError("Not enough data for LSTM prediction")
-                        pred = model.predict(sequences, verbose=0).flatten()
+                        pred = np.array(forecast)
                         pred = pred[:len(X)]
                         dummy = np.zeros((len(pred), X.shape[1]))
                         target_idx = X.columns.get_loc(processed_data['config']['target'])
                         dummy[:, target_idx] = pred
                         pred = scaler.inverse_transform(dummy)[:, target_idx]
 
-                else:  # RandomForest, XGBoost
+                else:  
                     scaler = self.scalers.get(i)
                     if scaler is not None:
                         X_scaled = scaler.transform(X)
@@ -327,6 +360,21 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
         min_length = min(len(p) for p in all_predictions)
         predictions = np.array([p[:min_length] for p in all_predictions])
         return np.mean(predictions, axis=0)
+    
+
+def predict_future(self, steps: int):
+    if not hasattr(self, 'feature_names_'):
+        raise ValueError("Model is not fitted with features")
+
+    last_input = processed_data['data'][self.feature_names_].iloc[-1]
+    future_inputs = pd.DataFrame([last_input.copy()] * steps)
+
+    for col in future_inputs.columns:
+        if future_inputs[col].dtype == 'object':
+            future_inputs[col] = 0  # default for unseen categories
+
+    return self.predict(future_inputs)
+
 def get_default_params(model_type: str, tuning_mode: str) -> Dict[str, Any]:
     presets = {
         "lstm": {
@@ -706,7 +754,8 @@ async def process_data(config: DataConfig):
         'config': {
             'time_column': config.timeColumn,
             'target': config.targetVariable,
-            'frequency': config.frequency
+            'frequency': config.frequency,
+            'forecast_horizon': config.forecast_horizon
         },
         'features': config.features + [f'{config.targetVariable}_lag{lag}' for lag in [1, 2, 3]] + 
                     [f'{config.targetVariable}_rolling_mean', f'{config.targetVariable}_rolling_std']
@@ -1149,26 +1198,49 @@ def create_ensemble_model(train, test, config):
 @app.post("/api/train")
 async def train_model(config: DataConfig, request: Request):
     user_id = request.headers.get("X-User-Id", "anonymous")
+    print("[DEBUG] Incoming config:", config)
 
     if processed_data is None:
         raise HTTPException(status_code=404, detail="No processed data available. Please process data first.")
-
+    
+    user_forecast_horizon = config.forecast_horizon
+    print(user_forecast_horizon)
+   
+    if user_forecast_horizon is None or user_forecast_horizon <= 0:
+        forecast_horizon = 30  # Default
+        print(f"[Warning] Invalid or missing forecast_horizon ({user_forecast_horizon}), using default: 30")
+    else:
+        forecast_horizon = int(user_forecast_horizon)
+        print(f"[Success] User specified forecast_horizon: {forecast_horizon}")
+    
+    # Store it in processed_data for consistency
+    processed_data['config']['forecast_horizon'] = int(user_forecast_horizon)
+    print(user_forecast_horizon)
+    
     df = processed_data['data']
     target = processed_data['config']['target']
 
     split_point = int(len(df) * 0.8)
     train = df.iloc[:split_point]
     test = df.iloc[split_point:]
+    
+    print(f"[CRITICAL] FINAL forecast_horizon being used: {forecast_horizon}")
 
     try:
         model = None
         params = {}
+        original_forecast_horizon = forecast_horizon  # Preserve original value
+
         if config.modelLevel != 'custom':
             model_params = get_default_params(config.modelType, config.modelLevel)
             config_dict = config.model_dump()
             config_dict.update(model_params)
             config = DataConfig(**config_dict)
-
+            config.forecast_horizon = forecast_horizon 
+       
+        config.forecast_horizon = original_forecast_horizon
+        print(f"[Verification] Config forecast_horizon after recreation: {config.forecast_horizon}")
+        
         if config.ensembleLearning:
             selected_models = config.ensembleModels
             print("[Ensemble] Selected models:", selected_models)
@@ -1182,6 +1254,7 @@ async def train_model(config: DataConfig, request: Request):
                     'ensembleModels': selected_models,
                     'ensembleMethod': config.ensembleMethod,
                     'ensembleWeights': config.ensembleWeights,
+                    'forecast_horizon': original_forecast_horizon,  # Pass it explicitly
                     **config.model_dump()
                 }
             )
@@ -1195,15 +1268,13 @@ async def train_model(config: DataConfig, request: Request):
                 'method': config.ensembleMethod
             }
 
-        transferred_model = None  # ensure it's defined
-        print(config.transferLearning ,config.sourceModelId)
+        transferred_model = None
         if config.transferLearning and config.sourceModelId:
             source_model_id = config.sourceModelId
             print("=== DEBUG TL BLOCK ===")
             print(f"transferLearning: {config.transferLearning}")
             print(f"sourceModelId: {config.sourceModelId}")
             print(f"trained_models keys: {list(trained_models.keys())}")
-            print(f"Trying transfer from source_model_id: {source_model_id}")
 
             if source_model_id not in trained_models:
                 print(f"[TL] Source model {source_model_id} not found")
@@ -1258,14 +1329,13 @@ async def train_model(config: DataConfig, request: Request):
                     transferred_model.scaler = scaler
                     transferred_model.sequence_length = sequence_length
 
-                else:  # Tree-based model: standard fitting
+                else:  # Tree-based model
                     X_train = train.drop(columns=[target])
                     y_train = train[target]
                     transferred_model.fit(X_train, y_train)
 
                 model = transferred_model
                 params = {"source_model_id": source_model_id, "transferred": True}
-
             else:
                 print("[TL] Transfer learning failed - falling back to regular training")
 
@@ -1284,9 +1354,7 @@ async def train_model(config: DataConfig, request: Request):
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown model type: {config.modelType}")
 
-
-
-        # ✅ Prediction
+        # Generate predictions on test set
         if config.ensembleLearning:
             X_test = test.copy()
             if hasattr(model, 'feature_names_'):
@@ -1330,6 +1398,7 @@ async def train_model(config: DataConfig, request: Request):
         actuals = test[target].values
         metrics = evaluate_model(model, train, test, config.modelType if not config.ensembleLearning else 'ensemble')
 
+        # Save model
         if not os.path.exists('models'):
             os.makedirs('models')
 
@@ -1370,7 +1439,157 @@ async def train_model(config: DataConfig, request: Request):
         actuals = actuals[:min_len]
         predictions = predictions[:min_len]
 
-        # ✅ FIXED: return block must be closed properly
+        # ✅ CRITICAL: Use the preserved original forecast_horizon
+        print(f"[CRITICAL BEFORE FORECASTING] Using forecast_horizon: {original_forecast_horizon}")
+
+        # === Future Forecasting Logic ===
+        future_output = {}
+        try:
+            last_date = df.index[-1]
+            freq = getattr(config, 'frequency', 'daily')
+            
+            if freq == 'daily':
+                future_freq = 'D'
+            elif freq == 'weekly':
+                future_freq = 'W-MON'
+            elif freq == 'monthly':
+                future_freq = 'MS'
+            else:
+                future_freq = 'D'
+
+            print(f"[FORECASTING START] Generating {original_forecast_horizon} future predictions")
+            print(f"[FORECASTING] Model type: {config.modelType}, Frequency: {freq}")
+            
+            # Generate future dates - EXACTLY the number requested
+            future_index = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=original_forecast_horizon, 
+                freq=future_freq
+            )
+            print(f"[FORECASTING] Generated {len(future_index)} future dates")
+
+            future_predictions = []
+
+            if config.modelType == 'arima':
+                print(f"[ARIMA] Forecasting {original_forecast_horizon} steps")
+                forecast_result = model.get_forecast(steps=original_forecast_horizon)
+                future_predictions = forecast_result.predicted_mean.values.tolist()
+                print(f"[ARIMA] Generated {len(future_predictions)} predictions")
+
+            elif config.modelType == 'prophet':
+                print(f"[PROPHET] Forecasting {original_forecast_horizon} steps")
+                future_df = pd.DataFrame({'ds': future_index})
+                future_forecast = model.predict(future_df)
+                future_predictions = future_forecast['yhat'].values.tolist()
+                print(f"[PROPHET] Generated {len(future_predictions)} predictions")
+
+            elif config.modelType == 'lstm':
+                print(f"[LSTM] Forecasting {original_forecast_horizon} steps")
+                sequence_length = getattr(model, 'sequence_length', 10)
+                scaler = getattr(model, 'scaler')
+                
+                # Start with the last sequence_length rows from the dataset
+                future_input = df.iloc[-sequence_length:].copy()
+                future_predictions = []
+
+                for step in range(original_forecast_horizon):
+                    print(f"[LSTM] Generating prediction {step + 1}/{original_forecast_horizon}")
+                    
+                    # Scale the input
+                    scaled_input = scaler.transform(future_input)
+                    X_input = scaled_input[-sequence_length:].reshape(1, sequence_length, scaled_input.shape[1])
+                    
+                    # Predict next value
+                    next_pred_scaled = model.predict(X_input, verbose=0).flatten()[0]
+                    
+                    # Inverse transform to get actual value
+                    dummy = np.zeros((1, scaled_input.shape[1]))
+                    target_idx = df.columns.get_loc(target)
+                    dummy[:, target_idx] = next_pred_scaled
+                    inverse_pred = scaler.inverse_transform(dummy)[:, target_idx][0]
+                    
+                    future_predictions.append(float(inverse_pred))
+                    
+                    # Update the input sequence for next prediction
+                    new_row = future_input.iloc[-1].copy()
+                    new_row[target] = inverse_pred
+                    future_input = pd.concat([future_input.iloc[1:], new_row.to_frame().T])
+
+                print(f"[LSTM] Generated {len(future_predictions)} predictions")
+
+            elif config.ensembleLearning:
+                print(f"[ENSEMBLE] Forecasting {original_forecast_horizon} steps")
+                if hasattr(model, 'predict_future'):
+                    future_predictions = model.predict_future(original_forecast_horizon)
+                else:
+                    # Fallback: iterative prediction for ensemble
+                    future_input = df.iloc[-1:].copy()
+                    future_predictions = []
+                    
+                    for step in range(original_forecast_horizon):
+                        X_future = future_input.drop(columns=[target])
+                        if hasattr(model, 'feature_names_'):
+                            for feature in model.feature_names_:
+                                if feature not in X_future.columns:
+                                    X_future[feature] = 0
+                            X_future = X_future[model.feature_names_]
+                        
+                        next_pred = model.predict(X_future)[0]
+                        future_predictions.append(float(next_pred))
+                        
+                        # Update input for next iteration
+                        new_row = future_input.iloc[-1].copy()
+                        new_row[target] = next_pred
+                        future_input = new_row.to_frame().T
+                
+                future_predictions = future_predictions[:original_forecast_horizon]
+                print(f"[ENSEMBLE] Generated {len(future_predictions)} predictions")
+
+            else:
+                # Random Forest, XGBoost, etc.
+                print(f"[{config.modelType.upper()}] Forecasting {original_forecast_horizon} steps")
+                future_input = df.iloc[-1:].copy()
+                future_predictions = []
+                
+                for step in range(original_forecast_horizon):
+                    print(f"[{config.modelType.upper()}] Generating prediction {step + 1}/{original_forecast_horizon}")
+                    
+                    X_future = future_input.drop(columns=[target])
+                    next_pred = model.predict(X_future.to_numpy())[0]
+                    future_predictions.append(float(next_pred))
+                    
+                    # Simple approach: update target with prediction, keep other features same
+                    new_row = future_input.iloc[-1].copy()
+                    new_row[target] = next_pred
+                    future_input = new_row.to_frame().T
+
+                print(f"[{config.modelType.upper()}] Generated {len(future_predictions)} predictions")
+
+            # ✅ FINAL VERIFICATION
+            print(f"[FINAL CHECK] Requested: {original_forecast_horizon}, Generated: {len(future_predictions)}")
+            print(f"[FINAL CHECK] Date range: {len(future_index)} dates")
+            
+            # Ensure exact match
+            future_predictions = future_predictions[:original_forecast_horizon]
+            future_index = future_index[:original_forecast_horizon]
+            
+            future_output = {
+                "dates": [date.strftime('%Y-%m-%d') for date in future_index],
+                "predictions": future_predictions,
+                "count": len(future_predictions)  # Add count for verification
+            }
+            
+            print(f"[SUCCESS] Returning {len(future_predictions)} future predictions")
+
+        except Exception as forecast_error:
+            print(f"[FORECAST ERROR] {forecast_error}")
+            import traceback
+            traceback.print_exc()
+            future_output = {
+                "error": str(forecast_error),
+                "requested_horizon": original_forecast_horizon
+            }
+
         response = {
             'status': 'success',
             'model_id': model_id,
@@ -1379,6 +1598,8 @@ async def train_model(config: DataConfig, request: Request):
             'dates': test.index.strftime('%Y-%m-%d').tolist(),
             'actual': actuals.tolist(),
             'forecasts': predictions.tolist(),
+            'futureForecast': future_output,
+            'requestedHorizon': original_forecast_horizon,  # Add for verification
             'dataInfo': {
                 'title': target,
                 'filename': 'forecast_data'
@@ -1394,16 +1615,16 @@ async def train_model(config: DataConfig, request: Request):
             }
         }
 
-        load_pretrained_models()  # refresh available models
+        load_pretrained_models()
         return response
 
     except Exception as e:
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail={
             'error': str(e),
             'details': traceback.format_exc()
         })
-
     
 @app.post("/api/export")
 async def export_results(config: ExportConfig):
@@ -1471,7 +1692,6 @@ async def export_results(config: ExportConfig):
         print(f"Export error: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
-
 # Move this here
 
 if __name__ == '__main__':

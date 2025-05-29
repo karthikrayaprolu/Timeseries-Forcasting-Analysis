@@ -99,6 +99,7 @@ const TrainStep = () => {
     isLoading,
     setIsLoading,
   } = useWorkflow();
+const [forecastHorizon, setForecastHorizon] = useState<number>(30);
 
   const [availableModels, setAvailableModels] = useState<SourceModel[]>([]);
   const [selectedSourceModel, setSelectedSourceModel] = useState<string>("");
@@ -270,6 +271,9 @@ const TrainStep = () => {
         targetVariable: process.targetVariable,
         frequency: process.frequency,
         ensembleModels: model.ensembleLearning ? ensembleModels : undefined,
+          forecast_horizon: process.forecast_horizon,
+     
+
       };
 
       const response = await api.trainModel(payload);
@@ -793,6 +797,7 @@ const TrainStep = () => {
             </div>
           )}
         </div>
+
 
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">

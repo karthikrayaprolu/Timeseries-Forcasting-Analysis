@@ -36,6 +36,7 @@ export interface ModelConfig {
   ensembleModels?: string[];
   ensembleMethod?: EnsembleMethod;
   ensembleWeights?: number[] | null;
+  forecast_horizon?: number;
 }
 
 export interface TrainingMetrics {

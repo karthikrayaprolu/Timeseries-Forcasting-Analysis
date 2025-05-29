@@ -135,37 +135,71 @@ const ProcessStep = () => {
     loadRelationships();
   }, [process.targetVariable, database.table]);
 
-  const handleProcess = async () => {
-    if (!process.timeColumn || !process.targetVariable || !process.frequency) {
-      toast.warning("Please select time column, target variable, and frequency");
-      return;
-    }
 
-    setIsLoading(true);
-    try {
-      const processResult = await api.processData({
-        timeColumn: process.timeColumn,
-        targetVariable: process.targetVariable,
-        frequency: process.frequency,
-        features: process.features || [],
-        aggregationMethod: process.aggregationMethod,
-      });
+  
+  const [forecastError, setForecastError] = useState("");
 
-      if (processResult.preview) {
-        toast.success(
-          `Data processed successfully. ${processResult.preview.rows} rows processed.`
-        );
-        setTimeout(() => setCurrentStep("train"), 1000);
-      } else {
-        throw new Error("Invalid response from server");
-      }
-    } catch (error: any) {
-      console.error("Error processing data:", error);
-      toast.error(error.message || "Failed to process data");
-    } finally {
-      setIsLoading(false);
+
+
+  const getForecastLimit = () => {
+    switch (process.frequency) {
+      case "weekly": return 52;
+      case "monthly": return 24;
+      default: return 365;
     }
   };
+
+  const getUnitLabel = () => {
+    switch (process.frequency) {
+      case "weekly": return "weeks";
+      case "monthly": return "months";
+      default: return "days";
+    }
+  };
+
+  const handleProcess = async () => {
+  if (!process.timeColumn || !process.targetVariable || !process.frequency) {
+    toast.warning("Please select time column, target variable, and frequency");
+    return;
+  }
+
+  // Add console log to check forecast_horizon value
+  console.log('Sending to backend - forecast_horizon:', process.forecast_horizon);
+  console.log('Full process config:', {
+    timeColumn: process.timeColumn,
+    targetVariable: process.targetVariable,
+    frequency: process.frequency,
+    features: process.features || [],
+    aggregationMethod: process.aggregationMethod,
+    forecast_horizon: process.forecast_horizon // Make sure this is included
+  });
+
+  setIsLoading(true);
+  try {
+    const processResult = await api.processData({
+      timeColumn: process.timeColumn,
+      targetVariable: process.targetVariable,
+      frequency: process.frequency,
+      features: process.features || [],
+      aggregationMethod: process.aggregationMethod,
+      forecast_horizon: process.forecast_horizon // Make sure this is included
+    });
+
+    if (processResult.preview) {
+      toast.success(
+        `Data processed successfully. ${processResult.preview.rows} rows processed.`
+      );
+      setTimeout(() => setCurrentStep("train"), 1000);
+    } else {
+      throw new Error("Invalid response from server");
+    }
+  } catch (error: any) {
+    console.error("Error processing data:", error);
+    toast.error(error.message || "Failed to process data");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleFeatureToggle = (column: string) => {
     const features = [...process.features];
@@ -434,6 +468,36 @@ const ProcessStep = () => {
               </div>
             </div>
           </div>
+          <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 mb-6">
+        <label className="text-lg font-medium text-gray-700 flex items-center gap-2 mb-2">
+          <Sparkles className="w-5 h-5 text-indigo-600" />
+          Forecast Duration
+        </label>
+        <p className="text-sm text-gray-500 mb-3">
+          How many {getUnitLabel()} ahead do you want to forecast?
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            className={`w-32 px-4 py-2 border-2 rounded-lg focus:outline-none focus:ring-2 ${
+              forecastError ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:border-indigo-500 focus:ring-indigo-200'
+            }`}
+            min={1}
+            max={getForecastLimit()}
+            value={process.forecast_horizon || ""}
+            onChange={(e) => {
+              const value = parseInt(e.target.value);
+              setProcess({ ...process, forecast_horizon: isNaN(value) ? undefined : value });
+            }}
+            placeholder={`e.g. 30`}
+          />
+          <span className="text-sm text-gray-600">{getUnitLabel()}</span>
+        </div>
+        {forecastError && (
+          <p className="text-red-500 text-sm mt-2">{forecastError}</p>
+        )}
+      </div>
+
 
           {/* Right Column - Additional Features */}
           <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 h-full flex flex-col">
