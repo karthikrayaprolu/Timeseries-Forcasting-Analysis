@@ -39,6 +39,8 @@ trained_models = {}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+
 def clean_numeric_string(value):
     if pd.isna(value):
         return np.nan
