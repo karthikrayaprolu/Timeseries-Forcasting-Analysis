@@ -162,7 +162,7 @@ class DataConfig(BaseModel):
     ensembleMethod: str = "voting"
     ensembleWeights: Optional[List[float]] = None
     sourceModelId: Optional[str] = None
-
+    modelLevel: str = "balanced" 
     order: Tuple[int, int, int] = (1, 1, 1)
     seasonal_order: Optional[Tuple[int, int, int, int]] = None
     changepoint_prior_scale: float = 0.05
@@ -185,7 +185,8 @@ class DataConfig(BaseModel):
     showCorrelationMap: bool = True
     correlationThreshold: float = 0.3  # Default threshold
     maxFeaturesToShow: int = 10  # Limit number of features in correlation map
-    
+    tuningMode: str = "balanced"  # new field: basic, fast, high_accuracy
+    advancedParams: Optional[Dict[str, Any]] = None
 
 class CorrelationRequest(BaseModel):
     targetVariable: str
@@ -325,16 +326,36 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
     # Truncate predictions to common length
         min_length = min(len(p) for p in all_predictions)
         predictions = np.array([p[:min_length] for p in all_predictions])
-
-        if self.method == 'voting':
-            weights = np.array([self.weights[i] for i in successful_models])
-            weights = weights / weights.sum()
-            return np.average(predictions, axis=0, weights=weights)
-        elif self.method == 'stacking':
-        # You can improve this by adding a trained meta-learner
-            return predictions[0]
-        else:
-            return np.mean(predictions, axis=0)
+        return np.mean(predictions, axis=0)
+def get_default_params(model_type: str, tuning_mode: str) -> Dict[str, Any]:
+    presets = {
+        "lstm": {
+            "basic": {"units": 32, "dropout": 0.1, "batch_size": 32, "epochs": 50, "sequence_length": 10},
+            "balanced": {"units": 64, "dropout": 0.2, "batch_size": 32, "epochs": 100, "sequence_length": 10},
+            "high_accuracy": {"units": 128, "dropout": 0.3, "batch_size": 16, "epochs": 150, "sequence_length": 20}
+        },
+        "random_forest": {
+            "basic": {"n_estimators": 50, "max_depth": 6},
+            "balanced": {"n_estimators": 100, "max_depth": 10},
+            "high_accuracy": {"n_estimators": 200, "max_depth": 15}
+        },
+        "xgboost": {
+            "basic": {"n_estimators": 50, "max_depth": 3, "learning_rate": 0.3},
+            "balanced": {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.1},
+            "high_accuracy": {"n_estimators": 200, "max_depth": 9, "learning_rate": 0.05}
+        },
+        "arima": {
+            "basic": {"order": (1,1,1)},
+            "balanced": {"order": (2,1,2)},
+            "high_accuracy": {"order": (3,1,3)}
+        },
+        "prophet": {
+            "basic": {"changepoint_prior_scale": 0.01, "seasonality_prior_scale": 5.0},
+            "balanced": {"changepoint_prior_scale": 0.05, "seasonality_prior_scale": 10.0},
+            "high_accuracy": {"changepoint_prior_scale": 0.1, "seasonality_prior_scale": 15.0}
+        }
+    }
+    return presets.get(model_type, {}).get(tuning_mode, {})
 
 def load_pretrained_models():
     """Improved model loading with better metadata handling"""
@@ -855,6 +876,7 @@ def train_prophet(train, test, config):
     return params, model
 
 def train_lstm(train, config):
+    # Use config parameters directly (they will be either from presets or custom)
     params = {
         'units': config.get('units', 50),
         'dropout': config.get('dropout', 0.2),
@@ -862,7 +884,7 @@ def train_lstm(train, config):
         'batch_size': config.get('batch_size', 32),
         'sequence_length': config.get('sequence_length', 10)
     }
-    
+    print(params)
     scaler = MinMaxScaler()
     scaled_data = scaler.fit_transform(train)
     scaled_df = pd.DataFrame(scaled_data, index=train.index, columns=train.columns)
@@ -910,6 +932,7 @@ def train_random_forest(train, test, config):
         'max_depth': config.get('max_depth', 10),
         'random_state': 42
     }
+    print(params)
     model = RandomForestRegressor(warm_start=True,**params, n_jobs=-1)
     X_train = train.drop(columns=[processed_data['config']['target']])
     y_train = train[processed_data['config']['target']]
@@ -924,6 +947,7 @@ def train_xgboost(train, test, config):
         'objective': 'reg:squarederror',
         'random_state': 42
     }
+    print(params)
     model = XGBRegressor(**params, n_jobs=-1)
     X_train = train.drop(columns=[processed_data['config']['target']])
     y_train = train[processed_data['config']['target']]
@@ -1139,6 +1163,11 @@ async def train_model(config: DataConfig, request: Request):
     try:
         model = None
         params = {}
+        if config.modelLevel != 'custom':
+            model_params = get_default_params(config.modelType, config.modelLevel)
+            config_dict = config.model_dump()
+            config_dict.update(model_params)
+            config = DataConfig(**config_dict)
 
         if config.ensembleLearning:
             selected_models = config.ensembleModels
