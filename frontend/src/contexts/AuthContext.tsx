@@ -62,6 +62,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const signup = async (email: string, password: string) => {
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
+      console.log("New user UID:", result.user.uid); 
       return result;
     } catch (error) {
       const authError = error as AuthError;

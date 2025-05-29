@@ -1,19 +1,58 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import { api } from "@/services/api";
 import { gsap } from "gsap";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
-// Simple SVG Spinner
+interface SourceModel {
+  id: string;
+  type: string;
+  target: string;
+  metrics: {
+    rmse?: number;
+    mae?: number;
+  };
+}
+
+const fetchAvailableModels = async (
+  setAvailableModels: (models: SourceModel[]) => void,
+  currentModelType: string
+) => {
+  try {
+    const response = await api.getAvailableModels();
+    const models = response.data || response;
+
+    if (!Array.isArray(models)) {
+      throw new Error("Invalid response format from server");
+    }
+
+    // Filter models by type and ensure they belong to the current user
+    const compatibleModels = models.filter(m =>
+      m.type.toLowerCase() === currentModelType.toLowerCase()
+    );
+
+    setAvailableModels(compatibleModels);
+
+    if (compatibleModels.length === 0) {
+      toast.warning(`No compatible pre-trained ${currentModelType} models available`, {
+        description: `Train a ${currentModelType} model first to use transfer learning`
+      });
+    }
+
+    return compatibleModels;
+  } catch (err) {
+    console.error('Error fetching models:', err);
+    toast.error("Failed to fetch available models", {
+      description: err instanceof Error ? err.message : "Please check your connection"
+    });
+    return [];
+  }
+};
+
 const Spinner = () => (
   <svg className="animate-spin h-5 w-5 text-white mr-2" viewBox="0 0 24 24">
     <circle
@@ -33,7 +72,6 @@ const Spinner = () => (
   </svg>
 );
 
-// Fun Animated Robot SVG (engaging during loading)
 const LoadingRobot = () => (
   <div className="flex flex-col items-center justify-center py-6">
     <svg width="80" height="80" viewBox="0 0 80 80" className="animate-bounce mb-2">
@@ -54,6 +92,7 @@ const LoadingRobot = () => (
 
 const TrainStep = () => {
   const {
+    process,
     model,
     setModel,
     setCurrentStep,
@@ -62,9 +101,11 @@ const TrainStep = () => {
     setIsLoading,
   } = useWorkflow();
 
+  const [availableModels, setAvailableModels] = useState<SourceModel[]>([]);
+  const [selectedSourceModel, setSelectedSourceModel] = useState<string>("");
+
   const componentRef = useRef<HTMLDivElement>(null);
 
-  // GSAP animation
   useEffect(() => {
     if (componentRef.current) {
       gsap.fromTo(
@@ -75,43 +116,258 @@ const TrainStep = () => {
     }
   }, []);
 
+  // Fetch available models when transfer learning is enabled
+  useEffect(() => {
+  const fetchModels = async () => {
+    if (model.transferLearning) {
+      setIsLoading(true);
+      try {
+        const models = await fetchAvailableModels(setAvailableModels, model.modelType);
+        if (models.length > 0) {
+          setSelectedSourceModel(models[0].id);
+          setModel(prev => ({ ...prev, sourceModelId: models[0].id }));
+        }
+      } catch (error) {
+        console.error("Model fetch error:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+  fetchModels();
+}, [model.transferLearning, model.modelType]);
+// Add model.modelType to dependencies
+  // Reset selected model when transfer learning is disabled
+  useEffect(() => {
+    if (!model.transferLearning) {
+      setSelectedSourceModel("");
+    }
+  }, [model.transferLearning]);
+
   const modelTypes = [
-    { id: "ARIMA", name: "ARIMA" },
-    { id: "Prophet", name: "Facebook Prophet" },
-    { id: "LSTM", name: "LSTM (Deep Learning)" },
-    { id: "RandomForest", name: "Random Forest" },
-    { id: "XGBoost", name: "XGBoost" },
+    {
+      id: "arima",
+      name: "ARIMA",
+      description: "Classical time series forecasting with auto regression"
+    },
+    {
+      id: "prophet",
+      name: "Prophet",
+      description: "Facebook's powerful forecasting tool with automatic seasonality"
+    },    { 
+      id: "lstm", 
+      name: "LSTM Neural Network",
+      description: "Deep learning for complex temporal patterns"
+    },
+    { 
+      id: "random_forest", 
+      name: "Random Forest",
+      description: "Powerful ensemble learning for time series forecasting"
+    },
+    { 
+      id: "xgboost", 
+      name: "XGBoost",
+      description: "High performance gradient boosting for accurate predictions"
+    }
   ];
 
   const handleTrain = async () => {
-    setIsLoading(true);
-    try {
-      const results = await api.trainModel({ ...model });
-      setResults(results);
-      toast.success("Model training completed successfully");
-      setCurrentStep("results");
-    } catch (error) {
-      console.error("Error training model:", error);
-      toast.error("Failed to train model");
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  try {
+    let modelParams: any = {};
+    
+    switch (model.modelType) {
+      case 'lstm':
+        modelParams = {
+          units: model.units ?? 50,
+          dropout: model.dropout ?? 0.2,
+          epochs: model.epochs ?? 100,
+          batch_size: model.batchSize ?? 32,
+          sequence_length: model.sequence_length ?? 10
+        };
+        break;
+      case 'random_forest':
+        modelParams = {
+          n_estimators: model.n_estimators ?? 100,
+          max_depth: model.max_depth ?? 10
+                  };
+        break;
+      case 'xgboost':
+        modelParams = {
+          n_estimators: model.n_estimators ?? 100,
+          max_depth: model.max_depth ?? 6,
+          learning_rate: model.learning_rate ?? 0.1
+        };
+        break;
+      case 'arima':
+        modelParams = {
+          order: model.order ?? [1, 1, 1]
+        };
+        break;
+      case 'prophet':
+        modelParams = {
+          changepoint_prior_scale: model.changepoint_prior_scale ?? 0.05,
+          seasonality_prior_scale: model.seasonality_prior_scale ?? 10,
+          seasonality_mode: model.seasonality_mode ?? 'additive'
+        };
+        break;
     }
-  };
+let ensembleModels = model.ensembleModels || [];
+if (model.ensembleLearning && !ensembleModels.includes(model.modelType)) {
+  ensembleModels = [...ensembleModels, model.modelType];
+}
+if (model.ensembleLearning && ensembleModels.length === 0) {
+  toast.warning("Please select at least one additional model for ensemble.");
+  setIsLoading(false);
+  return;
+}
 
-  // Back to previous step
+  const payload = {
+  ...model,
+  ...modelParams,
+  sourceModelId: model.transferLearning ? selectedSourceModel : null,
+  timeColumn: process.timeColumn,
+  targetVariable: process.targetVariable,
+  frequency: process.frequency,
+  ensembleModels: model.ensembleLearning ? ensembleModels : undefined,
+};
+
+    console.log('Sending payload:', payload);
+    console.log(JSON.stringify(payload, null, 2));
+
+    const response = await api.trainModel(payload);
+
+    if (!response || response.error) {
+      throw new Error(response?.error || 'Training failed');
+    }
+
+    setResults(response);
+    setCurrentStep("results");
+    toast.success("Training completed successfully!");
+  } catch (error) {
+    console.error('Training error:', error);
+    toast.error("Training failed: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    setIsLoading(false);
+  }
+};
+
   const handleBack = () => {
     setCurrentStep("process");
+  };
+  const renderModelParams = () => {
+    switch (model.modelType) {
+      case 'lstm':
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <label>Units</label>
+              <input
+                type="number"
+                value={model.units || 50}
+                onChange={(e) => setModel({...model, units: parseInt(e.target.value)})}
+                className="w-24 px-2 py-1 border rounded"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label>Dropout</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="1"
+                value={model.dropout || 0.2}
+                onChange={(e) => setModel({...model, dropout: parseFloat(e.target.value)})}
+                className="w-24 px-2 py-1 border rounded"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label>Sequence Length</label>
+              <input
+                type="number"
+                value={model.sequence_length || 10}
+onChange={(e) => setModel({ ...model, sequence_length: parseInt(e.target.value) })}
+                
+                className="w-24 px-2 py-1 border rounded"
+              />
+            </div>
+          </div>
+        );
+      
+      case 'random_forest':
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <label>Number of Estimators</label>
+            <input
+              type="number"
+              value={model.n_estimators || 100}
+              onChange={(e) => setModel({...model, n_estimators: parseInt(e.target.value)})}
+              className="w-24 px-2 py-1 border rounded"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <label>Max Depth</label>
+            <input
+              type="number"
+              value={model.max_depth || 10}
+              onChange={(e) => setModel({...model, max_depth: parseInt(e.target.value)})}
+              className="w-24 px-2 py-1 border rounded"
+            />
+          </div>
+        </div>
+      );
+
+      case 'xgboost':
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <label>Number of Estimators</label>
+              <input
+                type="number"
+                value={model.n_estimators || 100}
+                onChange={(e) => setModel({...model, n_estimators: parseInt(e.target.value)})}
+                className="w-24 px-2 py-1 border rounded"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label>Max Depth</label>
+              <input
+                type="number"
+                value={model.max_depth || 6}
+                onChange={(e) => setModel({...model, max_depth: parseInt(e.target.value)})}
+                className="w-24 px-2 py-1 border rounded"
+              />
+            </div>
+            {model.modelType === 'xgboost' && (
+              <div className="flex items-center justify-between">
+                <label>Learning Rate</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={model.learning_rate || 0.1}
+                  onChange={(e) => setModel({...model, learning_rate: parseFloat(e.target.value)})}
+                  className="w-24 px-2 py-1 border rounded"
+                />
+              </div>
+            )}
+          </div>
+        );
+      default:
+        return null;
+    }
   };
 
   return (
     <div
       ref={componentRef}
-      className="workflow-step w-full min-h-screen p-4 sm:p-8 bg-white rounded-none shadow-none"
+      className="workflow-step max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-lg"
       aria-label="Train Model Step"
     >
-      <h2 className="text-2xl font-semibold mb-6 text-center">Train Model</h2>
+      <h2 className="text-3xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-indigo-800 to-blue-600">Train Model</h2>
 
-      {/* Show engaging robot and message while loading */}
       {isLoading && <LoadingRobot />}
 
       <form
@@ -122,39 +378,47 @@ const TrainStep = () => {
         }}
         aria-disabled={isLoading}
       >
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="model-type">
-            Model Type
-          </label>
-          <Select
-            value={model.modelType}
-            onValueChange={(value) =>
-              setModel({ ...model, modelType: value as any })
-            }
-            disabled={isLoading}
-          >
-            <SelectTrigger className="w-full" id="model-type">
-              <SelectValue placeholder="Select model type" />
-            </SelectTrigger>
-            <SelectContent>
-              {modelTypes.map((type) => (
-                <SelectItem key={type.id} value={type.id as any}>
-                  {type.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="space-y-4">
+          <label className="text-lg font-medium text-gray-700">Model Selection</label>
+          <div className="grid grid-cols-1 gap-4">
+            {modelTypes.map((type) => (
+              <div
+                key={type.id}
+                className={`p-4 rounded-lg border-2 transition-all cursor-pointer ${
+                  model.modelType === type.id
+                    ? "border-indigo-500 bg-indigo-50"
+                    : "border-gray-200 hover:border-indigo-200 hover:bg-gray-50"
+                }`}
+                onClick={() => setModel({ ...model, modelType: type.id as any })}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className={`w-4 h-4 rounded-full ${
+                    model.modelType === type.id ? "bg-indigo-500" : "bg-gray-200"
+                  }`} />
+                  <div>
+                    <h3 className="font-medium text-gray-900">{type.name}</h3>
+                    <p className="text-sm text-gray-500">{type.description}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-4">
-          <label className="text-sm font-medium">Advanced Options</label>
-          <div className="space-y-4 bg-secondary/50 p-4 rounded-md">
+          <label className="text-lg font-medium text-gray-700">Model Parameters</label>
+          {renderModelParams()}
+        </div>
+
+        <div className="space-y-4">
+          <label className="text-lg font-medium text-gray-700">Advanced Options</label>
+          <div className="space-y-6 bg-gray-50 p-6 rounded-lg border-2 border-gray-200">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <label htmlFor="hyperparameter" className="text-sm font-medium">
+                <label htmlFor="hyperparameter" className="text-base font-medium text-gray-700">
                   Hyperparameter Tuning
                 </label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-gray-500">
                   Use grid/random search to find optimal parameters
                 </p>
               </div>
@@ -165,63 +429,151 @@ const TrainStep = () => {
                   setModel({ ...model, hyperparameterTuning: checked })
                 }
                 disabled={isLoading}
+                className="data-[state=checked]:bg-indigo-600"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <label htmlFor="ensemble" className="text-sm font-medium">
-                  Ensemble Learning
-                </label>
-                <p className="text-xs text-muted-foreground">
-                  Combine multiple models for better performance
-                </p>
-              </div>
-              <Switch
-                id="ensemble"
-                checked={model.ensembleLearning}
-                onCheckedChange={(checked) =>
-                  setModel({ ...model, ensembleLearning: checked })
-                }
-                disabled={isLoading}
-              />
-            </div>
+          <div className="flex items-center justify-between"> 
+  <div className="space-y-1">
+    <label htmlFor="ensemble" className="text-base font-medium text-gray-700">
+      Ensemble Learning
+    </label>
+    <p className="text-sm text-gray-500">
+      Combine multiple models for better performance
+    </p>
+  </div>
+  <Switch
+    id="ensemble"
+    checked={model.ensembleLearning}
+    onCheckedChange={(checked) => {
+      setModel({ ...model, ensembleLearning: checked });
+    }}
+    disabled={isLoading}
+    className="data-[state=checked]:bg-indigo-600"
+  />
+</div>
 
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <label htmlFor="transfer" className="text-sm font-medium">
-                  Transfer Learning
-                </label>
-                <p className="text-xs text-muted-foreground">
-                  Use pre-trained models to improve performance
-                </p>
-              </div>
-              <Switch
-                id="transfer"
-                checked={model.transferLearning}
-                onCheckedChange={(checked) =>
-                  setModel({ ...model, transferLearning: checked })
+{/* Model multi-select for ensemble */}
+{model.ensembleLearning && (
+  <div className="mt-4 space-y-2">
+    <label className="text-sm font-medium text-gray-700">Select Models to Combine</label>
+    <div className="space-y-2">
+      {['arima', 'prophet', 'lstm', 'random_forest', 'xgboost']
+        .filter((m) => m !== model.modelType) // exclude selected main model
+        .map((m) => (
+          <div key={m} className="flex items-center">
+            <input
+              type="checkbox"
+              id={`ensemble-${m}`}
+              checked={model.ensembleModels?.includes(m)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                let updated = model.ensembleModels || [];
+                if (checked) {
+                  updated = [...updated, m];
+                } else {
+                  updated = updated.filter((item) => item !== m);
                 }
-                disabled={isLoading}
-              />
+                setModel({ ...model, ensembleModels: updated });
+              }}
+              className="mr-2"
+            />
+            <label htmlFor={`ensemble-${m}`} className="text-sm capitalize">
+              {m.replace('_', ' ')}
+            </label>
+          </div>
+        ))}
+    </div>
+  </div>
+)}
+           <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <label htmlFor="transfer" className="text-base font-medium text-gray-700">
+                    Transfer Learning
+                  </label>
+                  <p className="text-sm text-gray-500">
+                    Use pre-trained models to improve performance
+                  </p>
+                </div>
+                <Switch
+                  id="transfer"
+                  checked={model.transferLearning}
+                  onCheckedChange={(checked) =>
+                    setModel({ ...model, transferLearning: checked })
+                  }
+                  disabled={isLoading}
+                  className="data-[state=checked]:bg-indigo-600"
+                />
+              </div>
+
+          
+{model.transferLearning && (
+  <div className="mt-4 border-t pt-4">
+    <Label htmlFor="sourceModel" className="mb-2 block">Source Model</Label>
+    {isLoading ? (
+      <div className="flex items-center justify-center py-2">
+        <Spinner />
+        <span className="ml-2">Loading models...</span>
+      </div>
+    ) : (
+      <>
+        <Select
+          value={selectedSourceModel}
+          onValueChange={(value) => {
+            setSelectedSourceModel(value);
+            setModel(prev => ({...prev, sourceModelId: value}));
+          }}
+          disabled={isLoading || availableModels.length === 0}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={
+              availableModels.length === 0 
+                ? "No compatible models available" 
+                : "Select a source model"
+            } />
+          </SelectTrigger>
+          {availableModels.length > 0 && (
+            <SelectContent>
+              {availableModels.map((sourceModel) => (
+                <SelectItem key={sourceModel.id} value={sourceModel.id}>
+                  {`${sourceModel.type} (trained on ${sourceModel.target}) - RMSE: ${sourceModel.metrics?.rmse?.toFixed(2) ?? 'N/A'}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          )}
+        </Select>
+        {availableModels.length === 0 && !isLoading && (
+          <div className="mt-2 p-3 bg-yellow-50 rounded-md">
+            <p className="text-sm text-yellow-700">
+              No compatible pre-trained {model.modelType} models available. 
+              Train a model first to use transfer learning.
+            </p>
+          </div>
+        )}
+      </>
+    )}
+  </div>
+)}
+              
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row justify-between gap-2 pt-4">
+        <div className="flex flex-col sm:flex-row justify-between gap-4 pt-6">
           <Button
             type="button"
             onClick={handleBack}
             variant="outline"
             disabled={isLoading}
-            className="w-full sm:w-auto"
+            className="h-12 px-8 border-2 border-gray-200 hover:border-gray-300 text-gray-700 font-medium rounded-lg transition-all"
           >
             Back
           </Button>
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full sm:w-auto flex items-center justify-center bg-blue-accent hover:bg-blue-accent/90"
+            className="h-12 px-8 bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-700 hover:to-blue-600 text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center"
           >
             {isLoading ? (
               <>

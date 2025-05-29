@@ -1,61 +1,17 @@
 import React, { createContext, useContext, useState, ReactNode } from "react";
+import { 
+  DatabaseConfig, 
+  ProcessConfig, 
+  ModelConfig,
+  ResultsData,
+  ModelType,
+  TimeFrequency
+} from "@/shared/types";
 
-<<<<<<< Updated upstream
-// Define types for our workflow
+
 export type WorkflowStep = "home" | "database" | "process" | "train" | "results";
-=======
-// Define workflow step type
-export type WorkflowStep = "home" | "database" | "process" | "train" | "results" ;
->>>>>>> Stashed changes
 
-export type DatabaseConfig = {
-  databaseType: string;
-  connectionString?: string;
-  schema?: string;
-  table?: string;
-};
-
-export type ProcessConfig = {
-  timeColumn: string;
-  targetVariable: string;
-  frequency: "daily" | "weekly" | "monthly";
-  features: string[];
-};
-
-export type ModelConfig = {
-  modelType: "ARIMA" | "Prophet" | "LSTM" | "RandomForest" | "XGBoost";
-  hyperparameterTuning: boolean;
-  ensembleLearning: boolean;
-  transferLearning: boolean;
-};
-
-export type ResultsData = {
-  metrics: {
-    mse: number;
-    rmse: number;
-    mae: number;
-    mape: number;
-  };
-  forecasts: {
-    dates: string[];
-    actual: number[];
-    predicted: number[];
-  };
-  dataInfo: {
-    title: string;
-    filename: string;
-  };
-  modelInfo: {
-    type: string;
-    parameters: Record<string, any>;
-    features: {
-      hyperparameterTuning: boolean;
-      transferLearning: boolean;
-      ensembleLearning: boolean;
-    };
-  };
-};
-
+// Define context type using shared types
 interface WorkflowContextType {
   currentStep: WorkflowStep | null;
   setCurrentStep: (step: WorkflowStep) => void;
@@ -74,7 +30,6 @@ interface WorkflowContextType {
   availableColumns: string[];
   setAvailableColumns: (columns: string[]) => void;
 }
-
 
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
 
@@ -105,7 +60,7 @@ export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
     setCurrentStep,
     database,
     setDatabase,
-    process,
+    process, 
     setProcess,
     model,
     setModel,

@@ -1445,10 +1445,6 @@ async def export_results(config: ExportConfig):
 
 # Move this here
 
-
-
-
-
 if __name__ == '__main__':
 
     import uvicorn

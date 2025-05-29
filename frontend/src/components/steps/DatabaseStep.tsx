@@ -42,8 +42,6 @@ const DatabaseStep = () => {
 
   // Database types
   const databaseTypes = [
-    { id: "mongodb", name: "MongoDB" },
-    { id: "postgres", name: "PostgreSQL" },
     { id: "local", name: "CSV Upload" },
   ];
 
@@ -59,32 +57,29 @@ const DatabaseStep = () => {
     } else {
       toast.error("Please upload a valid CSV file");
     }
-  };
-
-  // Connect to database
+  };  // Connect to database
   const handleConnect = async () => {
     setIsLoading(true);
     try {
       if (database.databaseType === "local" && csvData) {
         // Handle CSV file upload
         const formData = new FormData();
-        formData.append("file", csvData);
-        await api.uploadCsvFile(formData);
-        const tables = await api.getTables("local");
-        setAvailableTables(tables);
-        setIsConnected(true);
-        toast.success("CSV file uploaded successfully");
-      } else {
-        // Handle database connection
-        await api.connectToDatabase(database.connectionString || "");
-        const tables = await api.getTables(database.databaseType);
-        setAvailableTables(tables);
-        setIsConnected(true);
-        toast.success("Connected to database successfully");
+        formData.append("file", csvData, csvData.name); // Add filename as third parameter
+        const result = await api.uploadCsvFile(formData);
+        if (result.tables) {
+          setAvailableTables(result.tables);
+          setIsConnected(true);
+          toast.success("CSV file uploaded successfully");
+        }
+      } else if (database.databaseType !== "local" && database.connectionString) {
+        // For now we only support local CSV uploads
+        toast.error("Only local CSV files are supported at this time");
+        setIsLoading(false);
+        return;
       }
     } catch (error) {
-      console.error("Error connecting to database:", error);
-      toast.error("Failed to connect to database");
+      console.error("Error processing file:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to process file");
     } finally {
       setIsLoading(false);
     }
@@ -110,23 +105,23 @@ const DatabaseStep = () => {
   };
 
   return (
-    <div ref={componentRef} className="workflow-step">
-      <h2 className="step-title">Register Database</h2>
+    <div ref={componentRef} className="workflow-step max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-lg">
+      <h2 className="text-3xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-indigo-800 to-blue-600">Register Database</h2>
       
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Database Type</label>
+      <div className="space-y-8">
+        <div className="space-y-4">
+          <label className="text-lg font-medium text-gray-700">Database Type</label>
           <Select
             value={database.databaseType}
             onValueChange={handleDatabaseTypeChange}
             disabled={isLoading}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
               <SelectValue placeholder="Select database type" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
               {databaseTypes.map((type) => (
-                <SelectItem key={type.id} value={type.id}>
+                <SelectItem key={type.id} value={type.id} className="hover:bg-indigo-50 cursor-pointer">
                   {type.name}
                 </SelectItem>
               ))}
@@ -135,20 +130,19 @@ const DatabaseStep = () => {
         </div>
 
         {database.databaseType === "local" ? (
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Upload CSV File</label>
+          <div className="space-y-4">
+            <label className="text-lg font-medium text-gray-700">Upload CSV File</label>
             <FileUploader
               onFileSelect={handleFileUpload}
-              accept=".csv"
-              disabled={isLoading}
+              accept=".csv"              disabled={isLoading}
             />
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-gray-500">
               Upload a CSV file containing time series data
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Connection String</label>
+          <div className="space-y-4">
+            <label className="text-lg font-medium text-gray-700">Connection String</label>
             <Input
               placeholder="Connection string"
               value={database.connectionString || ""}
@@ -156,6 +150,7 @@ const DatabaseStep = () => {
                 setDatabase({ ...database, connectionString: e.target.value })
               }
               disabled={isLoading}
+              className="h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all"
             />
           </div>
         )}
@@ -163,26 +158,26 @@ const DatabaseStep = () => {
         <Button
           onClick={handleConnect}
           disabled={isLoading || !database.databaseType || (database.databaseType === "local" && !csvData)}
-          className="w-full"
+          className="w-full h-12 bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-700 hover:to-blue-600 text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
         >
           {isLoading ? "Connecting..." : "Connect"}
         </Button>
 
         {isConnected && (
-          <div className="space-y-4 mt-4 animate-fade-in">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Select Table</label>
+          <div className="space-y-6 mt-6 animate-fade-in">
+            <div className="space-y-4">
+              <label className="text-lg font-medium text-gray-700">Select Table</label>
               <Select
                 value={database.table}
                 onValueChange={handleTableChange}
                 disabled={isLoading}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full h-12 bg-gray-50 border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg transition-all">
                   <SelectValue placeholder="Select table" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-white border-2 border-gray-200 rounded-lg shadow-lg">
                   {availableTables.map((table) => (
-                    <SelectItem key={table} value={table}>
+                    <SelectItem key={table} value={table} className="hover:bg-indigo-50 cursor-pointer">
                       {table}
                     </SelectItem>
                   ))}
@@ -193,8 +188,7 @@ const DatabaseStep = () => {
             <Button
               onClick={handleNext}
               disabled={!database.table}
-              className="w-full"
-              variant="default"
+              className="w-full h-12 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all"
             >
               Next: Process Data
             </Button>
