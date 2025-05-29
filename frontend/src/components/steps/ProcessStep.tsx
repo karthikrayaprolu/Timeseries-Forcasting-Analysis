@@ -467,8 +467,7 @@ const ProcessStep = () => {
                 )}
               </div>
             </div>
-          </div>
-          <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 mb-6">
+              <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 mb-6">
         <label className="text-lg font-medium text-gray-700 flex items-center gap-2 mb-2">
           <Sparkles className="w-5 h-5 text-indigo-600" />
           Forecast Duration
@@ -498,6 +497,8 @@ const ProcessStep = () => {
         )}
       </div>
 
+          </div>
+        
 
           {/* Right Column - Additional Features */}
           <div className="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 h-full flex flex-col">
