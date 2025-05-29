@@ -561,7 +561,7 @@ const ProcessStep = () => {
             disabled={isLoading || isCorrLoading}
             className="bg-indigo-700 hover:bg-indigo-800 text-white px-8 py-2 flex items-center gap-2"
           >
-            <Sparkles className="w-4 h-4" />
+           
             Process My Data
           </Button>
         </div>
