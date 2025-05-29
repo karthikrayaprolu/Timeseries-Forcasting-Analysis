@@ -25,11 +25,12 @@ from sklearn.base import BaseEstimator, RegressorMixin
 from xgboost import XGBRegressor
 from sklearn.model_selection import ParameterGrid
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 import tensorflow as tf
 from io import BytesIO
 import uuid
 from pymongo import MongoClient
+from scipy.stats import spearmanr
 
 # Define your MongoDB URI here, e.g., "mongodb://localhost:27017/"
 
@@ -71,9 +72,73 @@ def clean_numeric_string(value: Any) -> float:
     except ValueError:
         return np.nan
 
-def clean_numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
-    return pd.to_numeric(df[column].apply(clean_numeric_string), errors='coerce')
+def clean_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:
+    """Enhanced numeric column cleaning with better handling of different data types"""
+    try:
+        series = df[col].copy()
+        
+        # If already numeric, just handle NaN and infinite values
+        if pd.api.types.is_numeric_dtype(series):
+            series = pd.to_numeric(series, errors='coerce')
+            series = series.replace([np.inf, -np.inf], np.nan)
+            return series
+        
+        # Handle object/string columns
+        if series.dtype == 'object':
+            # Convert to string first
+            series = series.astype(str)
+            
+            # Handle common patterns
+            series = series.str.strip()  # Remove whitespace
+            series = series.replace(['', 'NULL', 'null', 'NaN', 'nan', 'N/A', 'n/a'], np.nan)
+            
+            # Remove common non-numeric characters but preserve decimals and negative signs
+            series = series.str.replace(r'[$,%€£¥]', '', regex=True)  # Currency symbols
+            series = series.str.replace(r'[^\d.-]', '', regex=True)   # Keep only digits, dots, and hyphens
+            
+            # Handle multiple dots (keep only first one)
+            series = series.apply(lambda x: '.'.join(x.split('.')[:2]) if isinstance(x, str) and '.' in x else x)
+            
+            # Convert to numeric
+            series = pd.to_numeric(series, errors='coerce')
+            
+        else:
+            # For other data types, try direct conversion
+            series = pd.to_numeric(series, errors='coerce')
+        
+        # Replace infinite values with NaN
+        series = series.replace([np.inf, -np.inf], np.nan)
+        
+        return series
+        
+    except Exception as e:
+        print(f"Error cleaning column {col}: {str(e)}")
+        # Return original series if cleaning fails
+        return df[col]
 
+def validate_target_variable(df: pd.DataFrame, target_col: str) -> tuple[pd.Series, str]:
+    """Validate and clean target variable, return cleaned series and status message"""
+    if target_col not in df.columns:
+        raise ValueError(f"Target variable '{target_col}' not found in dataset")
+    
+    original_series = df[target_col].copy()
+    cleaned_series = clean_numeric_column(df, target_col)
+    
+    # Remove NaN values
+    cleaned_series = cleaned_series.dropna()
+    
+    if len(cleaned_series) == 0:
+        raise ValueError(f"Target variable '{target_col}' has no valid numeric data")
+    
+    # Check variance
+    unique_values = len(cleaned_series.unique())
+    variance = cleaned_series.var()
+    
+    if unique_values <= 1 or variance == 0:
+        raise ValueError(f"Target variable '{target_col}' has no variance (all values are identical)")
+    
+    status_msg = f"Target variable cleaned: {len(original_series)} -> {len(cleaned_series)} valid values, variance: {variance:.4f}"
+    
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple
 
@@ -117,6 +182,14 @@ class DataConfig(BaseModel):
     min_child_weight: float = 0
     subsample: float = 0.8
 
+    showCorrelationMap: bool = True
+    correlationThreshold: float = 0.3  # Default threshold
+    maxFeaturesToShow: int = 10  # Limit number of features in correlation map
+    
+
+class CorrelationRequest(BaseModel):
+    targetVariable: str
+   
 
 class ExportConfig(BaseModel):
     data: Dict[str, Any]
@@ -381,7 +454,183 @@ async def get_columns():
     if current_dataset is None:
         raise HTTPException(status_code=404, detail="No dataset loaded")
     return {"columns": list(current_dataset.columns)}
-
+@app.post("/api/correlations")
+async def get_correlations(config: CorrelationRequest) -> Dict[str, float]:
+    global current_dataset
+    
+    if current_dataset is None:
+        raise HTTPException(status_code=404, detail="No dataset loaded")
+    
+    df = current_dataset.copy()
+    
+    try:
+        # Step 1: Verify target variable exists first
+        if config.targetVariable not in df.columns:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Target variable '{config.targetVariable}' not found in dataset"
+            )
+        
+        print(f"Original target variable '{config.targetVariable}' has {len(df[config.targetVariable].unique())} unique values")
+        print(f"Target sample values: {df[config.targetVariable].head().tolist()}")
+        
+        # Step 2: Clean target variable first and check variance before cleaning other columns
+        target_series = df[config.targetVariable].copy()
+        
+        # Clean target variable
+        if target_series.dtype == 'object':
+            # Remove non-numeric characters and convert
+            target_series = target_series.astype(str).str.replace(r'[^0-9.-]', '', regex=True)
+            target_series = pd.to_numeric(target_series, errors='coerce')
+        else:
+            target_series = pd.to_numeric(target_series, errors='coerce')
+        
+        # Remove NaN values from target
+        target_series = target_series.dropna()
+        
+        if len(target_series) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Target variable '{config.targetVariable}' has no valid numeric data after cleaning"
+            )
+        
+        # Check variance in cleaned target
+        if len(target_series.unique()) <= 1 or target_series.var() == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Target variable '{config.targetVariable}' has no variance after cleaning (all values are identical)"
+            )
+        
+        print(f"Cleaned target variable has {len(target_series.unique())} unique values")
+        print(f"Target variance: {target_series.var()}")
+        
+        # Step 3: Clean all other columns
+        cleaned_df = pd.DataFrame(index=df.index)
+        cleaned_df[config.targetVariable] = target_series
+        
+        for col in df.columns:
+            if col == config.targetVariable:
+                continue
+                
+            try:
+                series = df[col].copy()
+                
+                # Try direct numeric conversion first
+                if series.dtype in ['int64', 'float64']:
+                    cleaned_series = pd.to_numeric(series, errors='coerce')
+                else:
+                    # Clean string data
+                    if series.dtype == 'object':
+                        # Remove common non-numeric characters
+                        series = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                        series = series.replace('', np.nan)
+                        cleaned_series = pd.to_numeric(series, errors='coerce')
+                    else:
+                        cleaned_series = pd.to_numeric(series, errors='coerce')
+                
+                # Only keep columns with some valid numeric data and variance
+                cleaned_series = cleaned_series.dropna()
+                if len(cleaned_series) > 0 and len(cleaned_series.unique()) > 1:
+                    # Align with target variable index
+                    common_index = target_series.index.intersection(cleaned_series.index)
+                    if len(common_index) > 1:  # Need at least 2 points for correlation
+                        cleaned_df.loc[common_index, col] = cleaned_series.loc[common_index]
+                        
+            except Exception as e:
+                print(f"Warning: Could not clean column {col}: {str(e)}")
+                continue
+        
+        # Step 4: Remove rows where target is NaN and ensure we have enough data
+        cleaned_df = cleaned_df.dropna(subset=[config.targetVariable])
+        
+        if len(cleaned_df) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Not enough valid data points for correlation analysis (need at least 2)"
+            )
+        
+        print(f"Final dataset shape: {cleaned_df.shape}")
+        print(f"Columns with data: {cleaned_df.columns.tolist()}")
+        
+        # Step 5: Calculate correlations
+        correlations = {}
+        target_data = cleaned_df[config.targetVariable]
+        
+        for col in cleaned_df.columns:
+            if col == config.targetVariable:
+                continue
+                
+            try:
+                feature_data = cleaned_df[col].dropna()
+                
+                # Find common indices
+                common_idx = target_data.index.intersection(feature_data.index)
+                if len(common_idx) < 2:
+                    continue
+                    
+                target_common = target_data.loc[common_idx]
+                feature_common = feature_data.loc[common_idx]
+                
+                # Remove any remaining NaN pairs
+                valid_mask = ~(target_common.isna() | feature_common.isna())
+                target_clean = target_common[valid_mask]
+                feature_clean = feature_common[valid_mask]
+                
+                if len(target_clean) < 2 or len(feature_clean.unique()) <= 1:
+                    continue
+                
+                # Calculate both Pearson and Spearman correlations
+                try:
+                    pearson_corr = target_clean.corr(feature_clean, method='pearson')
+                    spearman_corr = target_clean.corr(feature_clean, method='spearman')
+                    
+                    # Use the correlation with larger absolute value
+                    if pd.isna(pearson_corr) and pd.isna(spearman_corr):
+                        correlations[col] = 0.0
+                    elif pd.isna(pearson_corr):
+                        correlations[col] = round(float(spearman_corr), 4)
+                    elif pd.isna(spearman_corr):
+                        correlations[col] = round(float(pearson_corr), 4)
+                    else:
+                        if abs(pearson_corr) >= abs(spearman_corr):
+                            correlations[col] = round(float(pearson_corr), 4)
+                        else:
+                            correlations[col] = round(float(spearman_corr), 4)
+                            
+                except Exception as corr_error:
+                    print(f"Correlation calculation failed for {col}: {str(corr_error)}")
+                    correlations[col] = 0.0
+                    
+            except Exception as e:
+                print(f"Error processing column {col}: {str(e)}")
+                correlations[col] = 0.0
+                continue
+        
+        if not correlations:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid correlations could be calculated. Please check your data quality."
+            )
+        
+        # Sort by absolute correlation value
+        sorted_correlations = dict(
+            sorted(correlations.items(), key=lambda item: abs(item[1]), reverse=True)
+        )
+        
+        print(f"Calculated {len(sorted_correlations)} correlations")
+        print(f"Top correlations: {dict(list(sorted_correlations.items())[:5])}")
+        
+        return sorted_correlations
+    
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        print(f"Unexpected error in correlation calculation: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to compute correlations: {str(e)}"
+        )
 @app.post("/api/process")
 async def process_data(config: DataConfig):
     if current_dataset is None:
@@ -441,7 +690,7 @@ async def process_data(config: DataConfig):
         'features': config.features + [f'{config.targetVariable}_lag{lag}' for lag in [1, 2, 3]] + 
                     [f'{config.targetVariable}_rolling_mean', f'{config.targetVariable}_rolling_std']
     }
-    
+    correlation_matrix = df.corr().round(2).fillna(0).to_dict()
     return {
         "message": "Data processed successfully",
         "preview": {
@@ -450,7 +699,8 @@ async def process_data(config: DataConfig):
             "end_date": df.index.max().strftime('%Y-%m-%d'),
             "columns": df.columns.tolist(),
             "sample": df.head(5).to_dict(orient='records')
-        }
+        },
+        "correlationMatrix": correlation_matrix
     }
 
 def prepare_sequence_data(data, target_col, sequence_length):
@@ -1194,7 +1444,6 @@ async def export_results(config: ExportConfig):
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 # Move this here
-
 
 if __name__ == '__main__':
 

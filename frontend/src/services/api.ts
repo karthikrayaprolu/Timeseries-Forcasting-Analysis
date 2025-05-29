@@ -68,6 +68,17 @@ export const api = {
     }
   },
 
+getCorrelations: async (data: { targetVariable: string }) => {
+  try {
+    const response = await apiClient.post('/correlations', data);
+    return response.data;
+  } catch (error) {
+    handleApiError(error, 'Failed to fetch correlations');
+  }
+},
+
+
+
   // Process data
   processData: async (config: ProcessConfig) => {
     try {
@@ -114,9 +125,18 @@ export const api = {
   getResults: async (modelId: string): Promise<ResultsData> => {
     try {
       const response = await apiClient.get(`/results/${modelId}`);
-      return response.data;
-    } catch (error) {
-      handleApiError(error, 'Failed to get results');
-    }
+    return response.data;
+  } catch (error) {
+    handleApiError(error, 'Failed to get results');
   }
+},
+
+getTrainingHistory: async () => {
+  const headers = await getAuthHeaders();
+  const response = await apiClient.get("/history", { headers });
+  return response.data;
+}
+
 };
+
+

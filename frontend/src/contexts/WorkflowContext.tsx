@@ -8,7 +8,7 @@ import {
   TimeFrequency
 } from "@/shared/types";
 
-// Define workflow step type
+
 export type WorkflowStep = "home" | "database" | "process" | "train" | "results";
 
 // Define context type using shared types
