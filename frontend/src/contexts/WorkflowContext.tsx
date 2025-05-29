@@ -1,7 +1,12 @@
 import React, { createContext, useContext, useState, ReactNode } from "react";
 
+<<<<<<< Updated upstream
 // Define types for our workflow
 export type WorkflowStep = "home" | "database" | "process" | "train" | "results";
+=======
+// Define workflow step type
+export type WorkflowStep = "home" | "database" | "process" | "train" | "results" ;
+>>>>>>> Stashed changes
 
 export type DatabaseConfig = {
   databaseType: string;

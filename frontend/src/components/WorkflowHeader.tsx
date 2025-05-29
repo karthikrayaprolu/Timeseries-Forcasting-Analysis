@@ -28,6 +28,7 @@ const WorkflowHeader = () => {
     { id: "process", title: "Process Data", icon: FileInput },
     { id: "train", title: "Train Model", icon: Brain },
     { id: "results", title: "Results", icon: BarChart },
+
   ];
 
   const handleLogout = async () => {

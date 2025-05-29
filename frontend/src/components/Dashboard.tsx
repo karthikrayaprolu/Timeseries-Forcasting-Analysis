@@ -47,6 +47,7 @@ const Dashboard = () => {
         return <TrainStep />;
       case "results":
         return <ResultsStep />;
+    
       default:
         return <Home />;
     }
