@@ -266,10 +266,14 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
         successful_models = []
 
         if hasattr(self, 'feature_names_'):
+            # Add missing features with default 0
             for feature in self.feature_names_:
                 if feature not in X.columns:
                     X[feature] = 0
+
+            # Drop extra features that were not seen during training
             X = X[self.feature_names_]
+
 
         for i, model in enumerate(self.models):
             try:
@@ -282,9 +286,8 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
 
 
                 elif isinstance(model, Prophet):
-                    future_dates = pd.DataFrame({'ds': X.index})
                     last_date = processed_data['data'].index[-1]
-                    n_periods = processed_data['config']['frequency'].forecast_horizon or 30
+                    n_periods = processed_data['config'].get('forecast_horizon', 30)
                     freq_map = {
                         'daily': 'D',
                         'weekly': 'W-MON',
@@ -292,14 +295,12 @@ class EnsembleTimeSeriesModel(BaseEstimator, RegressorMixin):
                     }
                     freq = freq_map.get(processed_data['config']['frequency'], 'D')
 
+                    # Generate future dates
                     future_dates = pd.date_range(start=last_date + pd.Timedelta(1, unit='d'), periods=n_periods, freq=freq)
                     future_df = pd.DataFrame({'ds': future_dates})
-                    forecast = model.predict(future_df)
 
-                    future_dates['ds'] = pd.to_datetime(future_dates['ds'], errors='coerce')
-                    if future_dates['ds'].isnull().any():
-                        raise ValueError("Invalid dates in Prophet future_dates")
-                    forecast = model.predict(future_dates)
+                    # Predict with Prophet
+                    forecast = model.predict(future_df)
                     pred = forecast['yhat'].values
 
                 elif isinstance(model, Model):  # LSTM
@@ -726,13 +727,28 @@ async def process_data(config: DataConfig):
     df[f'{config.targetVariable}_rolling_mean'] = df[config.targetVariable].rolling(window=3).mean().shift(1)
     df[f'{config.targetVariable}_rolling_std'] = df[config.targetVariable].rolling(window=3).std().shift(1)
     
-    df = df.groupby(config.timeColumn).agg({
-        config.targetVariable: 'mean',
-        **{feature: 'mean' for feature in config.features if feature in df.columns},
-        **{f'{config.targetVariable}_lag{lag}': 'mean' for lag in [1, 2, 3]},
-        f'{config.targetVariable}_rolling_mean': 'mean',
-        f'{config.targetVariable}_rolling_std': 'mean'
-    }).reset_index()
+    agg_dict = {}
+
+    if config.targetVariable in df.columns:
+        agg_dict[config.targetVariable] = 'mean'
+
+    for feature in config.features:
+        if feature in df.columns:
+            agg_dict[feature] = 'mean'
+
+    for lag in [1, 2, 3]:
+        lag_col = f"{config.targetVariable}_lag{lag}"
+        if lag_col in df.columns:
+            agg_dict[lag_col] = 'mean'
+
+    if f'{config.targetVariable}_rolling_mean' in df.columns:
+        agg_dict[f'{config.targetVariable}_rolling_mean'] = 'mean'
+    if f'{config.targetVariable}_rolling_std' in df.columns:
+        agg_dict[f'{config.targetVariable}_rolling_std'] = 'mean'
+
+    # ✅ Then apply it
+    df = df.groupby(config.timeColumn).agg(agg_dict).reset_index()
+
     
     df.set_index(config.timeColumn, inplace=True)
     df.sort_index(inplace=True)
@@ -1480,14 +1496,21 @@ async def train_model(config: DataConfig, request: Request):
                 print(f"[PROPHET] Forecasting {original_forecast_horizon} steps")
                 future_df = pd.DataFrame({'ds': future_index})
                 future_forecast = model.predict(future_df)
+                if future_forecast is None or not isinstance(future_forecast, pd.DataFrame):
+                    raise ValueError("[ERROR] No valid future_forecast returned from ensemble.")
+                if 'yhat' not in future_forecast.columns:
+                    raise ValueError("[ERROR] 'yhat' column missing in future_forecast.")
                 future_predictions = future_forecast['yhat'].values.tolist()
                 print(f"[PROPHET] Generated {len(future_predictions)} predictions")
 
             elif config.modelType == 'lstm':
                 print(f"[LSTM] Forecasting {original_forecast_horizon} steps")
                 sequence_length = getattr(model, 'sequence_length', 10)
-                scaler = getattr(model, 'scaler')
-                
+                scaler = getattr(model, 'scaler', None)
+                if scaler is None and hasattr(model, 'scalers'):
+                    # Assume you're accessing scaler for LSTM or other internal model by name
+                    scaler = model.scalers.get('lstm', None)
+
                 # Start with the last sequence_length rows from the dataset
                 future_input = df.iloc[-sequence_length:].copy()
                 future_predictions = []
