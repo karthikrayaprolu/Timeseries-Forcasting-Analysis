@@ -169,6 +169,16 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
       id: "xgboost", 
       name: "XGBoost",
       description: "High performance gradient boosting for accurate predictions"
+    },
+    {
+      id: "ets",
+      name: "ETS (Exponential Smoothing)",
+      description: "Statistical model for time series with trend and seasonality"
+    },
+    {
+      id: "lightgbm",
+      name: "LightGBM",
+      description: "Efficient gradient boosting for fast and accurate predictions"
     }
   ];
 
@@ -211,6 +221,20 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
           case 'high_accuracy':
             modelParams = getHighAccuracyParams(model.modelType);
             break;
+          case 'ets':
+            modelParams = {
+              trend: model.trend ?? 'add',
+              seasonal: model.seasonal ?? 'add',
+              seasonal_periods: model.seasonal_periods ?? 12
+            };
+            break;
+          case 'lightgbm':
+            modelParams = {
+              num_leaves: model.num_leaves ?? 31,
+              learning_rate: model.learning_rate ?? 0.1,
+              n_estimators: model.n_estimators ?? 100
+            };
+            break;
           default:
             modelParams = getBasicParams(model.modelType);
         }
@@ -248,6 +272,20 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
               changepoint_prior_scale: model.changepoint_prior_scale ?? 0.05,
               seasonality_prior_scale: model.seasonality_prior_scale ?? 10,
               seasonality_mode: model.seasonality_mode ?? 'additive'
+            };
+            break;
+          case 'ets':
+            modelParams = {
+              trend: model.trend ?? 'add',
+              seasonal: model.seasonal ?? 'add',
+              seasonal_periods: model.seasonal_periods ?? 12
+            };
+            break;
+          case 'lightgbm':
+            modelParams = {
+              num_leaves: model.num_leaves ?? 31,
+              learning_rate: model.learning_rate ?? 0.1,
+              n_estimators: model.n_estimators ?? 100
             };
             break;
         }
@@ -314,6 +352,18 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
           max_depth: 3,
           learning_rate: 0.3
         };
+      case 'ets':
+        return {
+          trend: 'add',
+          seasonal: 'add',
+          seasonal_periods: 7
+        };
+      case 'lightgbm':
+        return {
+          num_leaves: 15,
+          learning_rate: 0.3,
+          n_estimators: 50
+        };
       default:
         return {};
     }
@@ -340,6 +390,18 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
           max_depth: 6,
           learning_rate: 0.1
         };
+      case 'ets':
+        return {
+          trend: 'add',
+          seasonal: 'add',
+          seasonal_periods: 12
+        };
+      case 'lightgbm':
+        return {
+          num_leaves: 31,
+          learning_rate: 0.1,
+          n_estimators: 100
+        };
       default:
         return {};
     }
@@ -365,6 +427,18 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
           n_estimators: 200,
           max_depth: 8,
           learning_rate: 0.05
+        };
+      case 'ets':
+        return {
+          trend: 'mul',
+          seasonal: 'mul',
+          seasonal_periods: 12
+        };
+      case 'lightgbm':
+        return {
+          num_leaves: 63,
+          learning_rate: 0.05,
+          n_estimators: 200
         };
       default:
         return {};
@@ -515,6 +589,105 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
             </div>
           </div>
         );
+      case 'ets':
+        return (
+          <div className="space-y-4 bg-teal-50 p-4 rounded-lg border border-teal-200 mt-4">
+            <h4 className="font-medium text-teal-900 mb-3">ETS Parameters</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Trend Type</label>
+                <Select
+                  value={model.trend || 'add'}
+                  onValueChange={(value) => setModel({ ...model, trend: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="add">Additive</SelectItem>
+                    <SelectItem value="mul">Multiplicative</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">Type of trend component</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Seasonal Type</label>
+                <Select
+                  value={model.seasonal || 'add'}
+                  onValueChange={(value) => setModel({ ...model, seasonal: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="add">Additive</SelectItem>
+                    <SelectItem value="mul">Multiplicative</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">Type of seasonal component</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Seasonal Periods</label>
+                <input
+                  type="number"
+                  value={model.seasonal_periods || 12}
+                  onChange={(e) => setModel({ ...model, seasonal_periods: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  min="1"
+                  max="52"
+                />
+                <p className="text-xs text-gray-500">Number of periods in a season (e.g., 12 for monthly)</p>
+              </div>
+            </div>
+          </div>
+        );
+      case 'lightgbm':
+        return (
+          <div className="space-y-4 bg-orange-50 p-4 rounded-lg border border-orange-200 mt-4">
+            <h4 className="font-medium text-orange-900 mb-3">LightGBM Parameters</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Number of Leaves</label>
+                <input
+                  type="number"
+                  value={model.num_leaves || 31}
+                  onChange={(e) => setModel({ ...model, num_leaves: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  min="2"
+                  max="131072"
+                />
+                <p className="text-xs text-gray-500">Maximum number of leaves in trees</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Learning Rate</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.001"
+                  max="1"
+                  value={model.learning_rate || 0.1}
+                  onChange={(e) => setModel({ ...model, learning_rate: parseFloat(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <p className="text-xs text-gray-500">Step size shrinkage</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Number of Estimators</label>
+                <input
+                  type="number"
+                  value={model.n_estimators || 100}
+                  onChange={(e) => setModel({ ...model, n_estimators: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  min="10"
+                  max="1000"
+                />
+                <p className="text-xs text-gray-500">Number of boosting iterations</p>
+              </div>
+            </div>
+          </div>
+        );
       
       default:
         return null;
@@ -526,7 +699,7 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
     return selectedModel ? selectedModel.name : "Select Model";
   };
 
-  const requiresModelLevel = ['lstm', 'random_forest', 'xgboost'].includes(model.modelType);
+  const requiresModelLevel = ['lstm', 'random_forest', 'xgboost','ets','lightgbm'].includes(model.modelType);
 
   return (
     <div
@@ -694,7 +867,7 @@ const [forecastHorizon, setForecastHorizon] = useState<number>(30);
                   <div className="mt-4 space-y-3 border-t pt-4">
                     <label className="text-sm font-medium text-gray-700">Select Additional Models</label>
                     <div className="grid grid-cols-2 gap-3">
-                      {['arima', 'prophet', 'lstm', 'random_forest', 'xgboost']
+                      {['arima', 'prophet', 'lstm', 'random_forest', 'xgboost', 'ets', 'lightgbm']
                         .filter((m) => m !== model.modelType)
                         .map((m) => (
                           <div key={m} className="flex items-center space-x-2 p-2 bg-gray-50 rounded">
