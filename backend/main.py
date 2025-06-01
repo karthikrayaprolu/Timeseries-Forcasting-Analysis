@@ -32,6 +32,9 @@ import uuid
 from pymongo import MongoClient
 from scipy.stats import spearmanr
 
+from statsmodels.tsa.exponential_smoothing.ets import ETSModel
+import lightgbm as lgb
+
 # Define your MongoDB URI here, e.g., "mongodb://localhost:27017/"
 
 
@@ -195,6 +198,16 @@ class DataConfig(BaseModel):
     maxFeaturesToShow: int = 10  # Limit number of features in correlation map
     tuningMode: str = "balanced"  # new field: basic, fast, high_accuracy
     advancedParams: Optional[Dict[str, Any]] = None
+    
+    # ETS parameters
+    trend: str = "add"
+    seasonal: str = "add"
+    seasonal_periods: int = 12
+    
+    # LightGBM parameters
+    num_leaves: int = 31
+    learning_rate: float = 0.1
+    n_estimators: int = 100
 
 class CorrelationRequest(BaseModel):
     targetVariable: str
@@ -402,6 +415,16 @@ def get_default_params(model_type: str, tuning_mode: str) -> Dict[str, Any]:
             "basic": {"changepoint_prior_scale": 0.01, "seasonality_prior_scale": 5.0},
             "balanced": {"changepoint_prior_scale": 0.05, "seasonality_prior_scale": 10.0},
             "high_accuracy": {"changepoint_prior_scale": 0.1, "seasonality_prior_scale": 15.0}
+        },
+        "ets": {
+            "basic": {"trend": "add", "seasonal": "add", "seasonal_periods": 7},
+            "balanced": {"trend": "add", "seasonal": "add", "seasonal_periods": 12},
+            "high_accuracy": {"trend": "mul", "seasonal": "mul", "seasonal_periods": 12}
+        },
+        "lightgbm": {
+            "basic": {"num_leaves": 15, "learning_rate": 0.3, "n_estimators": 50},
+            "balanced": {"num_leaves": 31, "learning_rate": 0.1, "n_estimators": 100},
+            "high_accuracy": {"num_leaves": 63, "learning_rate": 0.05, "n_estimators": 200}
         }
     }
     return presets.get(model_type, {}).get(tuning_mode, {})
@@ -849,7 +872,14 @@ def evaluate_model(model, train, test, model_type):
                 predictions = predictions[:len(test)]
             else:
                 raise ValueError("Not enough data points for sequence prediction")
+        
+        elif model_type == 'ets':
+            predictions = model.forecast(len(test))
             
+        elif model_type == 'lightgbm':
+            X_test = test.drop(columns=[processed_data['config']['target']])
+            predictions = model.predict(X_test.values)
+                
         else:
             ensemble = getattr(model, '_ensemble', None)
             scaler = None
@@ -1019,6 +1049,69 @@ def train_xgboost(train, test, config):
     model.fit(X_train.values, y_train)
     return params, model
 
+def train_ets(train, test, config):
+    params = {
+        'trend': config.get('trend', 'add'),
+        'seasonal': config.get('seasonal', 'add'),
+        'seasonal_periods': config.get('seasonal_periods', 12)
+    }
+    print(f"[ETS] Training with params: {params}")
+    target = processed_data['config']['target']
+    
+    # Validate data
+    train_data = train[target].dropna()
+    if len(train_data) < 2 * params['seasonal_periods']:
+        raise ValueError(f"Insufficient data points ({len(train_data)}) for ETS with seasonal_periods={params['seasonal_periods']}. Need at least {2 * params['seasonal_periods']}.")
+    if train_data.isna().all():
+        raise ValueError("Target column contains only NaN values")
+    if train_data.var() < 1e-6:
+        raise ValueError("Target column has near-zero variance, unsuitable for ETS")
+    
+    try:
+        model = ETSModel(
+            train_data,
+            error='add',
+            trend=params['trend'] if params['trend'] != 'none' else None,
+            seasonal=params['seasonal'] if params['seasonal'] != 'none' else None,
+            seasonal_periods=params['seasonal_periods']
+        )
+        fitted_model = model.fit(disp=False)
+        print("[ETS] Model training completed successfully")
+        return params, fitted_model
+    except Exception as e:
+        print(f"[ETS TRAINING ERROR] {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"ETS training failed: {str(e)}")
+
+def train_lightgbm(train, test, config):
+    params = {
+        'objective': 'regression',
+        'metric': 'rmse',
+        'boosting_type': 'gbdt',
+        'num_leaves': config.get('num_leaves', 31),
+        'learning_rate': config.get('learning_rate', 0.1),
+        'n_estimators': config.get('n_estimators', 100),
+        'random_state': 42
+    }
+    print(params)
+    target = processed_data['config']['target']
+    X_train = train.drop(columns=[target])
+    y_train = train[target]
+    
+    # Validate data
+    if X_train.empty:
+        raise ValueError("No features available for LightGBM training")
+    if y_train.isna().all():
+        raise ValueError("Target column contains only NaN values")
+    
+    try:
+        model = lgb.LGBMRegressor(**params)
+        model.fit(X_train.values, y_train)
+        return params, model
+    except Exception as e:
+        print(f"[ERROR] LightGBM training failed: {str(e)}")
+        raise
+
 def get_hyperparameter_grid(model_type):
     if model_type == 'arima':
         return {
@@ -1052,6 +1145,19 @@ def get_hyperparameter_grid(model_type):
             'min_child_weight': [0, 2, 4],
             'subsample': [0.8, 0.9, 1.0]
         }
+    elif model_type == 'ets':
+        return {
+            'trend': ['add', 'mul', None],
+            'seasonal': ['add', 'mul', None],
+            'seasonal_periods': [7, 12, 24]
+        }
+    elif model_type == 'lightgbm':
+        return {
+            'num_leaves': [15, 31, 63],
+            'learning_rate': [0.01, 0.1, 0.3],
+            'n_estimators': [50, 100, 200]
+        }
+        
     return {}
 
 def tune_hyperparameters(model_type, train, test, config):
@@ -1158,7 +1264,9 @@ def create_ensemble_model(train, test, config):
         'prophet': 'Prophet',
         'lstm': 'LSTM',
         'random_forest': 'RandomForest',
-        'xgboost': 'XGBoost'
+        'xgboost': 'XGBoost',
+        'ets': 'ETS',
+        'lightgbm': 'LightGBM'
     }
     # selected_models = [model_mapping.get(model, model) for model in config.get('ensembleModels', ['arima', 'lstm', 'xgboost'])]
     selected_models = [model_mapping.get(model, model) for model in config['ensembleModels']]
@@ -1187,6 +1295,12 @@ def create_ensemble_model(train, test, config):
                 X_train = train.drop(columns=[target])
                 y_train = train[target]
                 _, model = train_xgboost(train, test, config)
+            
+            elif model_type == 'ETS':
+                _, model = train_ets(train, test, config)
+                
+            elif model_type == 'LightGBM':
+                _, model = train_lightgbm(train, test, config)
 
             base_models.append((model_type.lower(), model))  # keep the lowercase name for traceability
             rmse = evaluate_model(model, train, test, model_type.lower()).get('rmse', np.inf)
@@ -1367,6 +1481,10 @@ async def train_model(config: DataConfig, request: Request):
                 params, model = train_random_forest(train, test, config.model_dump())
             elif config.modelType == 'xgboost':
                 params, model = train_xgboost(train, test, config.model_dump())
+            elif config.modelType == 'ets':
+                params, model = train_ets(train, test, config.model_dump())
+            elif config.modelType == 'lightgbm':
+                params, model = train_lightgbm(train, test, config.model_dump())
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown model type: {config.modelType}")
 
@@ -1407,6 +1525,19 @@ async def train_model(config: DataConfig, request: Request):
                 dummy[:, target_idx] = predictions
                 predictions = scaler.inverse_transform(dummy)[:, target_idx]
                 predictions = predictions[:len(test)]
+            elif config.modelType == 'ets':
+                try:
+                    predictions = model.forecast(len(test))
+                    if predictions is None or len(predictions) == 0:
+                        raise ValueError("ETS forecast returned no predictions")
+                    predictions = predictions.values.flatten()
+                except Exception as e:
+                    print(f"[ETS PREDICTION ERROR] {str(e)}")
+                    traceback.print_exc()
+                    raise HTTPException(status_code=500, detail=f"ETS test set prediction failed: {str(e)}")
+            elif config.modelType == 'lightgbm':
+                X_test = test.drop(columns=[target])
+                predictions = model.predict(X_test.values)
             else:
                 X_test = test.drop(columns=[target])
                 predictions = model.predict(X_test.to_numpy())
@@ -1539,7 +1670,37 @@ async def train_model(config: DataConfig, request: Request):
                     future_input = pd.concat([future_input.iloc[1:], new_row.to_frame().T])
 
                 print(f"[LSTM] Generated {len(future_predictions)} predictions")
-
+            
+            elif config.modelType == 'ets':
+                print(f"[ETS] Forecasting {original_forecast_horizon} steps")
+                try:
+                    future_predictions = model.forecast(original_forecast_horizon)
+                    if future_predictions is None or len(future_predictions) == 0:
+                        raise ValueError("ETS forecast returned no predictions")
+                    future_predictions = future_predictions.values.tolist()
+                    print(f"[ETS] Generated {len(future_predictions)} predictions")
+                except Exception as e:
+                    print(f"[ETS FORECAST ERROR] {str(e)}")
+                    traceback.print_exc()
+                    raise ValueError(f"ETS forecasting failed: {str(e)}")
+                
+            elif config.modelType == 'lightgbm':
+                print(f"[LIGHTGBM] Forecasting {original_forecast_horizon} steps")
+                future_input = df.iloc[-1:].copy()
+                future_predictions = []
+                
+                for step in range(original_forecast_horizon):
+                    print(f"[LIGHTGBM] Generating prediction {step + 1}/{original_forecast_horizon}")
+                    X_future = future_input.drop(columns=[target])
+                    next_pred = model.predict(X_future.values)[0]
+                    future_predictions.append(float(next_pred))
+                    
+                    # Update input for next iteration
+                    new_row = future_input.iloc[-1].copy()
+                    new_row[target] = next_pred
+                    future_input = new_row.to_frame().T
+                
+                print(f"[LIGHTGBM] Generated {len(future_predictions)} predictions")
             elif config.ensembleLearning:
                 print(f"[ENSEMBLE] Forecasting {original_forecast_horizon} steps")
                 if hasattr(model, 'predict_future'):
